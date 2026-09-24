@@ -31,3 +31,24 @@ the agent `PATH`, and records server logs at `$HOME/.t3/logs/server.log`.
 Repositories supplied through `initial_repositories` are cloned once into
 `$HOME/git/<directory>` and registered as T3 projects before the server starts.
 Each URL must be HTTPS and each directory must be a simple filename.
+
+## `ecr-credential-helper`
+
+[`modules/ecr-credential-helper`](modules/ecr-credential-helper) installs the
+Amazon ECR Docker credential helper for a Coder user and configures named ECR
+account/region registries without replacing other Docker credentials.
+
+```hcl
+module "ecr_credential_helper" {
+  source   = "./modules/ecr-credential-helper"
+  agent_id = coder_agent.main.id
+
+  registries = [
+    { account_id = "111122223333", region = "us-east-1" },
+    { account_id = "444455556666", region = "us-west-2" },
+  ]
+}
+```
+
+The agent user needs AWS credentials with access to the configured ECR
+repositories when it runs Docker.

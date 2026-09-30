@@ -1,6 +1,6 @@
 ---
 display_name: "T3 Server"
-description: "Installs and runs the T3 Code headless server as an owner-only Coder app."
+description: "Installs and runs the T3 Code headless server as a configurable Coder app."
 icon: "https://raw.githubusercontent.com/pingdotgg/t3code/main/assets/prod/t3-black-web-favicon-32x32.png"
 tags: ["t3-code", "development-tools", "coder"]
 ---
@@ -8,9 +8,9 @@ tags: ["t3-code", "development-tools", "coder"]
 # T3 Server
 
 This module installs T3 Code when it is not already present and runs its
-headless server on a Coder agent. It creates an owner-only Coder app and binds
-T3 only to loopback, so the server is available through Coder's authenticated
-app proxy rather than directly from the workspace network.
+headless server on a Coder agent. By default it creates an owner-only Coder
+app and binds T3 only to loopback, so the server is available through Coder's
+authenticated app proxy rather than directly from the workspace network.
 
 ## Usage
 
@@ -20,6 +20,8 @@ module "t3_server" {
 
   agent_id          = coder_agent.main.id
   working_directory = "/home/coder"
+  share             = "authenticated"
+  public_domain     = "t3.example.com"
 
   initial_repositories = [
     {
@@ -47,17 +49,19 @@ do not run systemd.
 | Name | Description | Type | Default | Required |
 | --- | --- | --- | --- | --- |
 | `agent_id` | ID of the Coder agent that runs T3 Code. | `string` | n/a | yes |
+| `share` | Coder app access: `owner`, `authenticated`, or `public`. | `string` | `owner` | no |
 | `port` | Loopback port for the T3 Code HTTP/WebSocket server. | `number` | `3773` | no |
 | `working_directory` | Directory from which T3 Code starts. | `string` | `/home/coder` | no |
 | `channel` | First-install release channel: `stable` or `nightly`. | `string` | `stable` | no |
 | `t3_version` | Optional exact version used only for a first installation. | `string` | `null` | no |
+| `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
 
 ## Outputs
 
 | Name | Description |
 | --- | --- |
-| `app_id` | ID of the owner-only T3 Code Coder app. |
+| `app_id` | ID of the T3 Code Coder app. |
 | `port` | Loopback port used by the server. |
 | `server_log_path` | Persistent, private server log path. |
 
@@ -77,5 +81,8 @@ an unrelated process or active work. Inspect startup failures with:
 tail -f ~/.t3/logs/server.log
 ```
 
-To pair a native client, run `t3 pair` interactively in the workspace. Do not
-put pairing URLs in provisioning scripts or logs.
+To pair a native client, run `t3 pair` interactively in the workspace. When
+`public_domain` is set, the module's `t3` shim rewrites the loopback address in
+the pairing URL to `https://<public_domain>`; configure that domain to proxy to
+this app before sharing a link. Do not put pairing URLs in provisioning scripts
+or logs.

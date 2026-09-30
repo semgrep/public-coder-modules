@@ -54,6 +54,54 @@ resource "coder_script" "t3_server" {
     fi
 
     t3_bin="$(command -v t3)"
+    t3_shim="$HOME/.local/bin/t3"
+    t3_real_bin_file="$t3_home/t3-real-bin"
+    public_domain_file="$t3_home/pair-public-domain"
+
+    # T3 records its loopback listening address in the running server state,
+    # so `t3 pair` would otherwise create a link that is unusable outside the
+    # workspace. Install a small PATH-precedence shim which only changes the
+    # displayed pairing URL. The real executable is retained separately so
+    # all other T3 commands are delegated unchanged.
+    if [ -f "$t3_real_bin_file" ]; then
+      t3_real_bin="$(cat "$t3_real_bin_file")"
+    elif [ "$t3_bin" = "$t3_shim" ]; then
+      t3_real_bin="$HOME/.local/bin/t3-real"
+      mv "$t3_shim" "$t3_real_bin"
+      printf '%s\n' "$t3_real_bin" > "$t3_real_bin_file"
+    else
+      t3_real_bin="$t3_bin"
+      printf '%s\n' "$t3_real_bin" > "$t3_real_bin_file"
+    fi
+    chmod 600 "$t3_real_bin_file"
+
+    printf '%s\n' "${var.public_domain}" > "$public_domain_file"
+    chmod 600 "$public_domain_file"
+
+    cat > "$t3_shim" <<'EOF'
+    #!/bin/sh
+    set -eu
+
+    t3_home="$HOME/.t3"
+    t3_real_bin="$(cat "$t3_home/t3-real-bin")"
+    public_domain="$(cat "$t3_home/pair-public-domain")"
+
+    if [ "$${1:-}" != "pair" ] || [ -z "$public_domain" ]; then
+      exec "$t3_real_bin" "$@"
+    fi
+
+    pair_output="$(mktemp)"
+    trap 'rm -f "$pair_output"' EXIT HUP INT TERM
+    if "$t3_real_bin" "$@" > "$pair_output"; then
+      pair_status=0
+    else
+      pair_status=$?
+    fi
+    sed "s|http://127.0.0.1:[0-9][0-9]*|https://$public_domain|g" "$pair_output"
+    exit "$pair_status"
+    EOF
+    chmod 755 "$t3_shim"
+    t3_bin="$t3_real_bin"
 
     # The template's GitHub external-auth setup supplies HTTPS credentials to
     # git via GIT_ASKPASS. Clone selected repositories once under ~/git, then
@@ -179,7 +227,7 @@ resource "coder_app" "t3" {
   display_name = "T3 Code"
   icon         = "https://raw.githubusercontent.com/pingdotgg/t3code/main/assets/prod/t3-black-web-favicon-32x32.png"
   url          = "http://127.0.0.1:${var.port}"
-  share        = "owner"
+  share        = var.share
   subdomain    = true
 
   # T3 has no documented health endpoint; its static web UI responds at /.

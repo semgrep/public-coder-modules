@@ -12,7 +12,7 @@ run "default_configuration" {
 
   assert {
     condition     = coder_app.t3.share == "owner"
-    error_message = "The T3 Coder app must remain owner-only."
+    error_message = "The default T3 Coder app share setting must remain owner-only."
   }
 
   assert {
@@ -30,6 +30,8 @@ run "custom_configuration" {
     working_directory = "/work/project"
     channel           = "nightly"
     t3_version        = "1.2.3"
+    share             = "authenticated"
+    public_domain     = "t3.example.com"
     initial_repositories = [
       {
         url       = "https://github.com/example/project.git"
@@ -44,6 +46,11 @@ run "custom_configuration" {
   }
 
   assert {
+    condition     = coder_app.t3.share == "authenticated"
+    error_message = "The Coder app must use the configured share setting."
+  }
+
+  assert {
     condition     = strcontains(coder_script.t3_server.script, "working_directory=\"/work/project\"")
     error_message = "The startup script must use the configured working directory."
   }
@@ -51,5 +58,10 @@ run "custom_configuration" {
   assert {
     condition     = strcontains(coder_script.t3_server.script, "T3CODE_VERSION=1.2.3")
     error_message = "An exact version must take precedence during first installation."
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "t3.example.com") && strcontains(coder_script.t3_server.script, "s|http://127.0.0.1:[0-9][0-9]*|https://$public_domain|g")
+    error_message = "The pairing shim must rewrite loopback pairing URLs to the public domain."
   }
 }

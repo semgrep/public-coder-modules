@@ -1,5 +1,5 @@
 output "app_id" {
-  description = "ID of the owner-only Coder app for T3 Code."
+  description = "ID of the Coder app for T3 Code."
   value       = coder_app.t3.id
 }
 

@@ -3,6 +3,17 @@ variable "agent_id" {
   type        = string
 }
 
+variable "share" {
+  description = "Who can access the T3 Code Coder app."
+  type        = string
+  default     = "owner"
+
+  validation {
+    condition     = contains(["owner", "authenticated", "public"], var.share)
+    error_message = "share must be one of: owner, authenticated, or public."
+  }
+}
+
 variable "port" {
   description = "Loopback port for the T3 Code HTTP/WebSocket server."
   type        = number
@@ -36,6 +47,17 @@ variable "t3_version" {
   type        = string
   default     = null
   nullable    = true
+}
+
+variable "public_domain" {
+  description = "Optional public domain for pairing URLs, without a scheme. The domain must route HTTPS traffic to this T3 app."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.public_domain == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$", var.public_domain))
+    error_message = "public_domain must be empty or a domain name without a scheme, path, or port."
+  }
 }
 
 variable "initial_repositories" {

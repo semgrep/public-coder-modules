@@ -52,3 +52,17 @@ module "ecr_credential_helper" {
 
 The agent user needs AWS credentials with access to the configured ECR
 repositories when it runs Docker.
+
+## `git-credential-coder`
+
+[`modules/git-credential-coder`](modules/git-credential-coder) configures a
+host-scoped Git HTTPS credential helper that retrieves fresh credentials from
+Coder external authentication. It avoids persisting access tokens and works
+for Git commands that run outside an interactive shell.
+
+```hcl
+module "git_credential_coder" {
+  source   = "./modules/git-credential-coder"
+  agent_id = coder_agent.main.id
+}
+```

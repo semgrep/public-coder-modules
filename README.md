@@ -2,6 +2,22 @@
 
 Reusable Terraform modules for [Coder](https://coder.com/) workspace templates.
 
+## `pi-coding-agent`
+
+[`modules/pi-coding-agent`](modules/pi-coding-agent) installs the Pi CLI at
+workspace start. Set `pi_version` to an exact release for controlled upgrades,
+or leave it at `latest` to update when a new npm release appears. It keeps Pi
+state in the Coder user's persistent home and adds `pi` to the agent `PATH`.
+
+```hcl
+module "pi_coding_agent" {
+  source = "./modules/pi-coding-agent"
+
+  agent_id   = coder_agent.main.id
+  pi_version = "1.0.0"
+}
+```
+
 ## `t3-server`
 
 [`modules/t3-server`](modules/t3-server) installs and starts the T3 Code

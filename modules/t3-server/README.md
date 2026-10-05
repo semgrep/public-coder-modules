@@ -8,9 +8,9 @@ tags: ["t3-code", "development-tools", "coder"]
 # T3 Server
 
 This module installs T3 Code when it is not already present and runs its
-headless server on a Coder agent. By default it creates an owner-only Coder
-app and binds T3 only to loopback, so the server is available through Coder's
-authenticated app proxy rather than directly from the workspace network.
+headless server as an OpenRC user service on a Coder agent. By default it
+creates an owner-only Coder app and binds T3 only to loopback. The server is
+available through Coder's authenticated app proxy.
 
 ## Usage
 
@@ -34,16 +34,19 @@ module "t3_server" {
 
 ## Prerequisites
 
-The agent image must provide `curl`, `git`, `ps`, `readlink`, and a POSIX shell.
+The agent image must provide OpenRC user services (`rc-service --user`,
+`openrc-run`, and `supervise-daemon`), a writable `XDG_RUNTIME_DIR`, `curl`,
+`git`, `ps`, `readlink`, and a POSIX shell.
 The first workspace start needs outbound access to `https://t3.codes/install.sh`
 unless T3 is already installed. Channel switches also need access to T3 release
-downloads. Repository bootstrap requires that the agent can
-authenticate to the supplied HTTPS Git remotes; configure this in the calling
+downloads. Repository bootstrap requires that the agent can authenticate to
+the supplied HTTPS Git remotes; configure this in the calling
 workspace template (for example, with Coder external auth).
 
 This module is intended for Linux Coder agents with persistent home storage.
-It does not install a system service because Coder workspace containers often
-do not run systemd.
+It writes a user service to `${XDG_CONFIG_HOME:-$HOME/.config}/rc/init.d/t3-code`
+and starts it with `rc-service --user t3-code start`. No root privileges or
+system OpenRC service are required.
 
 ## Inputs
 
@@ -68,14 +71,15 @@ do not run systemd.
 
 ## Behavior and operations
 
-T3 state, sessions, projects, credentials, PID file, and logs live in
+T3 state, sessions, projects, credentials, and logs live in
 `$HOME/.t3`. The module prepends `$HOME/.local/bin` to the agent `PATH`, which
 makes the T3 executable available in Coder terminals and SSH sessions.
 
 When `t3_version` is unset, the module installs from `channel` if T3 is absent.
 On later starts it reads the installed CLI's `t3 --version` output and switches
 to the selected channel only when it differs. A switch uses
-`t3 update --channel <channel> --allow-downgrade --yes`, so an ephemeral
+`t3 update --channel <channel> --allow-downgrade --yes` while the OpenRC service
+is stopped, so an ephemeral
 nightly selection returns to stable on the next start. An unchanged channel
 does not contact the release service or upgrade T3. When `t3_version` is set,
 it takes precedence on first install; existing installations are left at their
@@ -83,16 +87,19 @@ current version and channel. It does not continuously enforce the exact version.
 
 `initial_repositories` is idempotent: an existing Git checkout is reused and
 each project is registered only once. It accepts only HTTPS URLs and simple
-directory names to prevent path traversal. For a channel switch, startup stops
-the server only when its PID file identifies a live T3 server, then waits for
-it to exit before updating and restarting it. This interrupts active work.
-If a server responds without a verified PID, startup fails instead of claiming
-the new channel is active. Channel detection depends on the CLI's version
+directory names to prevent path traversal. OpenRC supervises and restarts T3
+if it exits unexpectedly. A channel or server-configuration change stops and
+starts the service, interrupting active work. On the first start after upgrading
+from the former PID-managed module, the script stops a legacy server only if its
+PID still identifies a T3 `serve` process. If a server responds outside the
+OpenRC service, startup fails instead of claiming the selected channel is active.
+Channel detection depends on the CLI's version
 format: versions with `-nightly.` are nightly, plain versions are stable, and
 unrecognized formats fail startup. Inspect startup failures with:
 
 ```sh
 tail -f ~/.t3/logs/server.log
+rc-service --user t3-code status
 ```
 
 To pair a native client, run `t3 pair` interactively in the workspace. When

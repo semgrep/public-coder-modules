@@ -19,6 +19,11 @@ run "default_configuration" {
     condition     = coder_env.t3_path.merge_strategy == "prepend"
     error_message = "The T3 installation directory must be prepended to PATH."
   }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "supervisor=supervise-daemon") && strcontains(coder_script.t3_server.script, "rc-service --user t3-code start")
+    error_message = "The startup script must use an OpenRC user service for T3."
+  }
 }
 
 run "custom_configuration" {

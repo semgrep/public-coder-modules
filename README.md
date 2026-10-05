@@ -21,8 +21,8 @@ module "pi_coding_agent" {
 ## `t3-server`
 
 [`modules/t3-server`](modules/t3-server) installs and starts the T3 Code
-headless server on a Coder agent. It creates an owner-only **T3 Code** app,
-listening on loopback port `3773` by default.
+headless server as an OpenRC user service on a Coder agent. It creates an
+owner-only **T3 Code** app, listening on loopback port `3773` by default.
 
 ```hcl
 module "t3_server" {
@@ -46,7 +46,8 @@ an unchanged channel does not trigger an upgrade. `t3_version` takes precedence
 on first install and disables later channel switching; it does not enforce an
 exact version after installation. The module leaves T3 state in `$HOME/.t3`,
 adds `$HOME/.local/bin` to the agent `PATH`, and records server logs at
-`$HOME/.t3/logs/server.log`.
+`$HOME/.t3/logs/server.log`. The agent image must provide OpenRC user services
+and a writable `XDG_RUNTIME_DIR`.
 
 Repositories supplied through `initial_repositories` are cloned once into
 `$HOME/git/<directory>` and registered as T3 projects before the server starts.

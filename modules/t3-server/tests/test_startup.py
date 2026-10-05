@@ -27,11 +27,27 @@ class StartupTest(unittest.TestCase):
         self.home.mkdir()
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        self.runtime = self.root / "runtime"
+        self.runtime.mkdir()
         self.events = self.root / "events"
         write_executable(
             self.bin / "curl",
             '#!/bin/sh\ncase "$*" in *install.sh*) cat "$MOCK_INSTALLER" ;; *) '
             '[ -f "$HOME/.t3/ready" ] ;; esac\n',
+        )
+        write_executable(self.bin / "openrc-run", '#!/bin/sh\nexit 0\n')
+        write_executable(self.bin / "supervise-daemon", '#!/bin/sh\nexit 0\n')
+        write_executable(
+            self.bin / "rc-service",
+            '#!/bin/sh\n'
+            'case "$3" in\n'
+            '  status) [ -f "$HOME/.t3/openrc-running" ] ;;\n'
+            '  stop) echo "service stop" >> "$MOCK_EVENTS"; '
+            'rm -f "$HOME/.t3/openrc-running" "$HOME/.t3/ready" ;;\n'
+            '  start) echo "service start" >> "$MOCK_EVENTS"; '
+            '"$HOME/.t3/serve-openrc"; touch "$HOME/.t3/openrc-running" ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac\n',
         )
         self.installer = self.root / "installer"
         self.installer.write_text(
@@ -43,6 +59,7 @@ class StartupTest(unittest.TestCase):
             'ln -sfn "$MOCK_ROOT/$target" "$HOME/.local/bin/t3"\n'
         )
         self.env = dict(os.environ, HOME=str(self.home), PATH=f"{self.bin}:/usr/bin:/bin",
+                        XDG_RUNTIME_DIR=str(self.runtime), XDG_CONFIG_HOME=str(self.home / '.config'),
                         MOCK_ROOT=str(self.root), MOCK_EVENTS=str(self.events),
                         MOCK_INSTALLER=str(self.installer))
         for channel, version in (("stable", "0.0.46"), ("nightly", "0.0.46-nightly.20261005.1")):
@@ -80,8 +97,7 @@ class StartupTest(unittest.TestCase):
         }
         for original, replacement in replacements.items():
             script = script.replace(original, replacement)
-        script = script.replace('$${1:-}', '${1:-}')
-        script = script.replace('$${process_state#Z}', '${process_state#Z}')
+        script = script.replace('$${', '${')
         self.assertNotIn('${var.', script)
         path = self.root / 'startup.sh'
         path.write_text(script)
@@ -100,6 +116,10 @@ class StartupTest(unittest.TestCase):
         events = self.start('nightly')
         self.assertIn('update update --channel nightly --allow-downgrade --yes', events)
         self.assertIn('serve ' + str(self.root / 'nightly'), events)
+        self.assertIn('service start', events)
+        self.assertIn('supervisor=supervise-daemon',
+                      (self.home / '.config/rc/init.d/t3-code').read_text())
+        self.assertFalse((self.home / '.t3/server.pid').exists())
 
     def test_nightly_to_stable(self):
         self.installed('nightly')
@@ -111,6 +131,29 @@ class StartupTest(unittest.TestCase):
         self.installed('nightly')
         events = self.start('nightly')
         self.assertFalse(any(line.startswith(('install ', 'update ')) for line in events))
+
+    def test_openrc_service_stops_before_switch_and_stays_up_when_unchanged(self):
+        self.installed('stable')
+        self.start('stable')
+        self.events.unlink()
+        events = self.start('nightly')
+        self.assertLess(events.index('service stop'),
+                        events.index('update update --channel nightly --allow-downgrade --yes'))
+        self.assertLess(events.index('update update --channel nightly --allow-downgrade --yes'),
+                        events.index('service start'))
+        self.events.unlink()
+        events = self.start('nightly')
+        self.assertFalse(any(line.startswith(('service ', 'update ')) for line in events))
+
+    def test_openrc_service_restarts_when_server_configuration_changes(self):
+        self.installed('stable')
+        self.start('stable')
+        (self.home / '.t3/service-config').write_text('9000|/old/project\n')
+        self.events.unlink()
+        events = self.start('stable')
+        self.assertIn('service stop', events)
+        self.assertIn('service start', events)
+        self.assertFalse(any(line.startswith('update ') for line in events))
 
     def test_unknown_running_server_blocks_switch(self):
         self.installed('stable')
@@ -124,7 +167,6 @@ class StartupTest(unittest.TestCase):
         self.assertIn('install  0.0.46', events)
         self.assertFalse(any(line.startswith('update ') for line in events))
         self.events.unlink()
-        (self.home / '.t3/ready').unlink()
         events = self.start('nightly', '0.0.46')
         self.assertFalse(any(line.startswith(('install ', 'update ')) for line in events))
 

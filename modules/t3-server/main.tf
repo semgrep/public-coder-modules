@@ -40,6 +40,8 @@ resource "coder_script" "t3_server" {
 
     mkdir -p "$log_dir"
     chmod 700 "$t3_home" "$log_dir"
+    : >> "$log_file"
+    chmod 600 "$log_file"
 
     # T3 serves its web UI at /. There is no documented dedicated health
     # endpoint, so a successful, local HTTP response is the least fragile
@@ -177,59 +179,100 @@ resource "coder_script" "t3_server" {
       rm -f "$repositories_file"
     fi
 
-    if [ "$channel_switch_needed" = false ] && is_healthy; then
-      exit 0
+    if ! command -v rc-service >/dev/null 2>&1 || ! command -v openrc-run >/dev/null 2>&1 || ! command -v supervise-daemon >/dev/null 2>&1; then
+      echo "OpenRC user services require rc-service, openrc-run, and supervise-daemon" >&2
+      exit 1
+    fi
+    if [ -z "$${XDG_RUNTIME_DIR:-}" ] || [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+      echo "OpenRC user services require a writable XDG_RUNTIME_DIR" >&2
+      exit 1
     fi
 
-    existing_t3_pid=""
+    service_dir="$${XDG_CONFIG_HOME:-$HOME/.config}/rc/init.d"
+    service_config="$t3_home/service-config"
+    service_restart_needed=false
+    if [ ! -f "$service_config" ] || [ "$(cat "$service_config")" != "$port|$working_directory" ]; then
+      service_restart_needed=true
+    fi
+    printf '%s\n' "$port|$working_directory" > "$service_config"
+    printf '%s\n' "$port" > "$t3_home/server-port"
+    printf '%s\n' "$working_directory" > "$t3_home/server-working-directory"
+    chmod 600 "$service_config" "$t3_home/server-port" "$t3_home/server-working-directory"
+    mkdir -p "$service_dir"
+
+    # OpenRC supervises the foreground server. The wrapper reads the current
+    # binary and settings on each spawn, including after a channel switch.
+    cat > "$t3_home/serve-openrc" <<'EOF'
+    #!/bin/sh
+    set -eu
+    t3_home="$HOME/.t3"
+    t3_bin="$(cat "$t3_home/t3-real-bin")"
+    port="$(cat "$t3_home/server-port")"
+    working_directory="$(cat "$t3_home/server-working-directory")"
+    cd "$working_directory"
+    exec "$t3_bin" serve --host 127.0.0.1 --port "$port" "$working_directory" \
+      >/dev/null 2>>"$t3_home/logs/server.log" < /dev/null
+    EOF
+    chmod 700 "$t3_home/serve-openrc"
+
+    cat > "$service_dir/t3-code" <<'EOF'
+    #!/usr/bin/env openrc-run
+    description="T3 Code headless server"
+    supervisor=supervise-daemon
+    command="$HOME/.t3/serve-openrc"
+    pidfile="$XDG_RUNTIME_DIR/t3-code.pid"
+    respawn_delay=1
+    respawn_max=10
+    respawn_period=60
+    EOF
+    chmod 700 "$service_dir/t3-code"
+
+    service_running=false
+    if rc-service --user t3-code status >/dev/null 2>&1; then
+      service_running=true
+    fi
+
+    # One-time handoff from the older PID-managed module. Never kill a PID
+    # without checking that it still belongs to a T3 serve process.
     if [ -f "$pid_file" ]; then
-      pid="$(cat "$pid_file" 2>/dev/null || true)"
-      case "$pid" in
-        ''|*[!0-9]*) rm -f "$pid_file" ;;
-        *)
-          # A PID can be reused. Only retain it when it is still a T3 server;
-          # never terminate a process based on a PID file alone.
-          command_line="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-          case "$command_line" in
-            *t3*serve*) existing_t3_pid="$pid" ;;
-            *) rm -f "$pid_file" ;;
-          esac
-          ;;
-      esac
+      if [ "$service_running" = false ]; then
+        old_pid="$(cat "$pid_file" 2>/dev/null || true)"
+        case "$old_pid" in
+          ''|*[!0-9]*) old_pid="" ;;
+          *)
+            command_line="$(ps -p "$old_pid" -o args= 2>/dev/null || true)"
+            case "$command_line" in *t3*serve*) ;; *) old_pid="" ;; esac
+            ;;
+        esac
+        if [ -n "$old_pid" ]; then
+          kill "$old_pid"
+          attempt=0
+          while kill -0 "$old_pid" 2>/dev/null && [ "$attempt" -lt 30 ]; do
+            process_state="$(ps -p "$old_pid" -o stat= 2>/dev/null || true)"
+            case "$process_state" in Z*) break ;; esac
+            attempt=$((attempt + 1))
+            sleep 1
+          done
+          process_state="$(ps -p "$old_pid" -o stat= 2>/dev/null || true)"
+          if kill -0 "$old_pid" 2>/dev/null && [ -n "$process_state" ] && [ "$${process_state#Z}" = "$process_state" ]; then
+            echo "Legacy T3 server did not stop; inspect $log_file" >&2
+            exit 1
+          fi
+        fi
+      fi
+      rm -f "$pid_file"
     fi
 
-    # A just-started server can still be becoming ready. Do not create a
-    # second instance when the PID file belongs to a live T3 server; wait for
-    # it instead. An unresponsive live process is left untouched rather than
-    # risking an unrelated PID or a user's in-flight work.
-    if [ "$channel_switch_needed" = true ]; then
-      # An update changes the launcher but leaves a manually started server
-      # running. Stop only the verified PID from this module, then wait for it
-      # to exit before replacing the binary or advertising the new channel.
-      if [ -n "$existing_t3_pid" ]; then
-        kill "$existing_t3_pid"
-        attempt=0
-        while kill -0 "$existing_t3_pid" 2>/dev/null && [ "$attempt" -lt 30 ]; do
-          process_state="$(ps -p "$existing_t3_pid" -o stat= 2>/dev/null || true)"
-          case "$process_state" in Z*) break ;; esac
-          attempt=$((attempt + 1))
-          sleep 1
-        done
-        process_state="$(ps -p "$existing_t3_pid" -o stat= 2>/dev/null || true)"
-        if kill -0 "$existing_t3_pid" 2>/dev/null && [ -n "$process_state" ] && [ "$${process_state#Z}" = "$process_state" ]; then
-          echo "Existing T3 Code server did not stop; inspect $log_file" >&2
-          exit 1
-        fi
-        rm -f "$pid_file"
-      elif is_healthy; then
-        echo "A server is already listening on port $port without a verified T3 PID; cannot switch channel safely" >&2
-        exit 1
-      fi
-      if is_healthy; then
-        echo "T3 Code is still responding on port $port after stopping its PID; cannot switch channel safely" >&2
-        exit 1
-      fi
+    if [ "$service_running" = true ] && { [ "$channel_switch_needed" = true ] || [ "$service_restart_needed" = true ]; }; then
+      rc-service --user t3-code stop
+      service_running=false
+    fi
+    if [ "$service_running" = false ] && is_healthy; then
+      echo "A server is responding on port $port outside the OpenRC service" >&2
+      exit 1
+    fi
 
+    if [ "$channel_switch_needed" = true ]; then
       "$t3_bin" update --channel "$selected_channel" --allow-downgrade --yes
       if [ ! -L "$t3_shim" ]; then
         echo "T3 update did not replace its launcher; cannot verify the selected channel" >&2
@@ -243,53 +286,20 @@ resource "coder_script" "t3_server" {
       fi
       printf '%s\n' "$t3_bin" > "$t3_real_bin_file"
       install_pairing_shim
-    elif [ -n "$existing_t3_pid" ]; then
-      attempt=0
-      while [ "$attempt" -lt 30 ]; do
-        if is_healthy; then
-          exit 0
-        fi
-        if ! kill -0 "$existing_t3_pid" 2>/dev/null; then
-          rm -f "$pid_file"
-          break
-        fi
-        attempt=$((attempt + 1))
-        sleep 1
-      done
-      if [ -f "$pid_file" ] && kill -0 "$existing_t3_pid" 2>/dev/null; then
-        echo "Existing T3 Code server did not become ready; inspect $log_file" >&2
-        exit 1
-      fi
     fi
 
-    cd "$working_directory"
-
-    # nohup detaches the process from Coder's startup-script session; no
-    # systemd service is required in this Kubernetes container.
-    # `serve` writes headless pairing details to stdout. Keep stdout out of
-    # provisioning and persistent logs; users create pairing links themselves
-    # with `t3 pair` in an interactive shell.
-    nohup "$t3_bin" serve --host 127.0.0.1 --port "$port" "$working_directory" \
-      >/dev/null 2>>"$log_file" < /dev/null &
-    t3_pid=$!
-    printf '%s\n' "$t3_pid" > "$pid_file"
-    chmod 600 "$pid_file" "$log_file"
-
+    if [ "$service_running" = false ]; then
+      rc-service --user t3-code start
+    fi
     attempt=0
     while [ "$attempt" -lt 30 ]; do
-      if is_healthy; then
+      if rc-service --user t3-code status >/dev/null 2>&1 && is_healthy; then
         exit 0
-      fi
-      if ! kill -0 "$t3_pid" 2>/dev/null; then
-        rm -f "$pid_file"
-        echo "T3 Code exited during startup; inspect $log_file" >&2
-        exit 1
       fi
       attempt=$((attempt + 1))
       sleep 1
     done
-
-    echo "T3 Code did not become ready; inspect $log_file" >&2
+    echo "T3 Code OpenRC service did not become ready; inspect $log_file" >&2
     exit 1
   EOT
 }

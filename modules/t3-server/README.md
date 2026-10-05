@@ -34,9 +34,10 @@ module "t3_server" {
 
 ## Prerequisites
 
-The agent image must provide `curl`, `git`, `ps`, and a POSIX shell. The first
-workspace start needs outbound access to `https://t3.codes/install.sh` unless
-T3 is already installed. Repository bootstrap requires that the agent can
+The agent image must provide `curl`, `git`, `ps`, `readlink`, and a POSIX shell.
+The first workspace start needs outbound access to `https://t3.codes/install.sh`
+unless T3 is already installed. Channel switches also need access to T3 release
+downloads. Repository bootstrap requires that the agent can
 authenticate to the supplied HTTPS Git remotes; configure this in the calling
 workspace template (for example, with Coder external auth).
 
@@ -52,8 +53,8 @@ do not run systemd.
 | `share` | Coder app access: `owner`, `authenticated`, or `public`. | `string` | `owner` | no |
 | `port` | Loopback port for the T3 Code HTTP/WebSocket server. | `number` | `3773` | no |
 | `working_directory` | Directory from which T3 Code starts. | `string` | `/home/coder` | no |
-| `channel` | First-install release channel: `stable` or `nightly`. | `string` | `stable` | no |
-| `t3_version` | Optional exact version used only for a first installation. | `string` | `null` | no |
+| `channel` | Release channel selected at each start: `stable` or `nightly`. | `string` | `stable` | no |
+| `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
 
@@ -71,11 +72,24 @@ T3 state, sessions, projects, credentials, PID file, and logs live in
 `$HOME/.t3`. The module prepends `$HOME/.local/bin` to the agent `PATH`, which
 makes the T3 executable available in Coder terminals and SSH sessions.
 
+When `t3_version` is unset, the module installs from `channel` if T3 is absent.
+On later starts it reads the installed CLI's `t3 --version` output and switches
+to the selected channel only when it differs. A switch uses
+`t3 update --channel <channel> --allow-downgrade --yes`, so an ephemeral
+nightly selection returns to stable on the next start. An unchanged channel
+does not contact the release service or upgrade T3. When `t3_version` is set,
+it takes precedence on first install; existing installations are left at their
+current version and channel. It does not continuously enforce the exact version.
+
 `initial_repositories` is idempotent: an existing Git checkout is reused and
 each project is registered only once. It accepts only HTTPS URLs and simple
-directory names to prevent path traversal. A startup waits for a live T3
-process identified by its PID file instead of terminating it, avoiding risk to
-an unrelated process or active work. Inspect startup failures with:
+directory names to prevent path traversal. For a channel switch, startup stops
+the server only when its PID file identifies a live T3 server, then waits for
+it to exit before updating and restarting it. This interrupts active work.
+If a server responds without a verified PID, startup fails instead of claiming
+the new channel is active. Channel detection depends on the CLI's version
+format: versions with `-nightly.` are nightly, plain versions are stable, and
+unrecognized formats fail startup. Inspect startup failures with:
 
 ```sh
 tail -f ~/.t3/logs/server.log

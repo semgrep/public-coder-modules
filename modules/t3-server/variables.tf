@@ -32,7 +32,7 @@ variable "working_directory" {
 }
 
 variable "channel" {
-  description = "T3 Code release channel used only when T3 is not already installed."
+  description = "T3 Code release channel to install or select on each start, unless t3_version is set."
   type        = string
   default     = "stable"
 
@@ -43,7 +43,7 @@ variable "channel" {
 }
 
 variable "t3_version" {
-  description = "Optional exact T3 Code version. When null, channel selects the release train on first install."
+  description = "Optional exact T3 Code version for first installation. When set, channel switching is disabled on later starts."
   type        = string
   default     = null
   nullable    = true

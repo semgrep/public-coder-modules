@@ -19,7 +19,7 @@ resource "coder_script" "t3_server" {
   icon               = "https://raw.githubusercontent.com/pingdotgg/t3code/main/assets/prod/t3-black-web-favicon-32x32.png"
   run_on_start       = true
   start_blocks_login = true
-  timeout            = 120
+  timeout            = 300
 
   # Install and start together: Terraform resource ordering does not order the
   # runtime execution of separate Coder scripts.
@@ -35,6 +35,8 @@ resource "coder_script" "t3_server" {
     port="${var.port}"
     working_directory="${var.working_directory}"
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
+    selected_channel="${var.channel}"
+    exact_version="${var.t3_version == null ? "" : var.t3_version}"
 
     mkdir -p "$log_dir"
     chmod 700 "$t3_home" "$log_dir"
@@ -46,7 +48,9 @@ resource "coder_script" "t3_server" {
       curl -fsS --max-time 2 "http://127.0.0.1:$port/" >/dev/null 2>&1
     }
 
+    first_install=false
     if ! command -v t3 >/dev/null 2>&1; then
+      first_install=true
       # The official installer writes the executable symlink to
       # $HOME/.local/bin and the runtime/data under $HOME/.t3. It only runs
       # when absent, so restarts do not upgrade T3 implicitly.
@@ -70,7 +74,7 @@ resource "coder_script" "t3_server" {
       mv "$t3_shim" "$t3_real_bin"
       printf '%s\n' "$t3_real_bin" > "$t3_real_bin_file"
     else
-      t3_real_bin="$t3_bin"
+      t3_real_bin="$(readlink -f "$t3_bin")"
       printf '%s\n' "$t3_real_bin" > "$t3_real_bin_file"
     fi
     chmod 600 "$t3_real_bin_file"
@@ -78,7 +82,11 @@ resource "coder_script" "t3_server" {
     printf '%s\n' "${var.public_domain}" > "$public_domain_file"
     chmod 600 "$public_domain_file"
 
-    cat > "$t3_shim" <<'EOF'
+    # The updater replaces ~/.local/bin/t3 with its own symlink. Restore the
+    # pairing shim after a channel change, using the newly installed target.
+    install_pairing_shim() {
+      rm -f "$t3_shim"
+      cat > "$t3_shim" <<'EOF'
     #!/bin/sh
     set -eu
 
@@ -100,8 +108,32 @@ resource "coder_script" "t3_server" {
     sed "s|http://127.0.0.1:[0-9][0-9]*|https://$public_domain|g" "$pair_output"
     exit "$pair_status"
     EOF
-    chmod 755 "$t3_shim"
+      chmod 755 "$t3_shim"
+    }
+    install_pairing_shim
     t3_bin="$t3_real_bin"
+
+    version_channel() {
+      case "$1" in
+        't3 v'[0-9]*.[0-9]*.[0-9]*-nightly.*) printf '%s\n' nightly ;;
+        't3 v'[0-9]*.[0-9]*.[0-9]*)
+          case "$1" in *-*) return 1 ;; *) printf '%s\n' stable ;; esac
+          ;;
+        *) return 1 ;;
+      esac
+    }
+
+    channel_switch_needed=false
+    if [ "$first_install" = false ] && [ -z "$exact_version" ]; then
+      installed_version="$("$t3_bin" --version)"
+      if ! installed_channel="$(version_channel "$installed_version")"; then
+        echo "Cannot identify installed T3 channel from: $installed_version" >&2
+        exit 1
+      fi
+      if [ "$installed_channel" != "$selected_channel" ]; then
+        channel_switch_needed=true
+      fi
+    fi
 
     # The template's GitHub external-auth setup supplies HTTPS credentials to
     # git via GIT_ASKPASS. Clone selected repositories once under ~/git, then
@@ -145,7 +177,7 @@ resource "coder_script" "t3_server" {
       rm -f "$repositories_file"
     fi
 
-    if is_healthy; then
+    if [ "$channel_switch_needed" = false ] && is_healthy; then
       exit 0
     fi
 
@@ -170,7 +202,48 @@ resource "coder_script" "t3_server" {
     # second instance when the PID file belongs to a live T3 server; wait for
     # it instead. An unresponsive live process is left untouched rather than
     # risking an unrelated PID or a user's in-flight work.
-    if [ -n "$existing_t3_pid" ]; then
+    if [ "$channel_switch_needed" = true ]; then
+      # An update changes the launcher but leaves a manually started server
+      # running. Stop only the verified PID from this module, then wait for it
+      # to exit before replacing the binary or advertising the new channel.
+      if [ -n "$existing_t3_pid" ]; then
+        kill "$existing_t3_pid"
+        attempt=0
+        while kill -0 "$existing_t3_pid" 2>/dev/null && [ "$attempt" -lt 30 ]; do
+          process_state="$(ps -p "$existing_t3_pid" -o stat= 2>/dev/null || true)"
+          case "$process_state" in Z*) break ;; esac
+          attempt=$((attempt + 1))
+          sleep 1
+        done
+        process_state="$(ps -p "$existing_t3_pid" -o stat= 2>/dev/null || true)"
+        if kill -0 "$existing_t3_pid" 2>/dev/null && [ -n "$process_state" ] && [ "$${process_state#Z}" = "$process_state" ]; then
+          echo "Existing T3 Code server did not stop; inspect $log_file" >&2
+          exit 1
+        fi
+        rm -f "$pid_file"
+      elif is_healthy; then
+        echo "A server is already listening on port $port without a verified T3 PID; cannot switch channel safely" >&2
+        exit 1
+      fi
+      if is_healthy; then
+        echo "T3 Code is still responding on port $port after stopping its PID; cannot switch channel safely" >&2
+        exit 1
+      fi
+
+      "$t3_bin" update --channel "$selected_channel" --allow-downgrade --yes
+      if [ ! -L "$t3_shim" ]; then
+        echo "T3 update did not replace its launcher; cannot verify the selected channel" >&2
+        exit 1
+      fi
+      t3_bin="$(readlink -f "$t3_shim")"
+      updated_version="$("$t3_bin" --version)"
+      if ! updated_channel="$(version_channel "$updated_version")" || [ "$updated_channel" != "$selected_channel" ]; then
+        echo "T3 update did not select $selected_channel (got $updated_version)" >&2
+        exit 1
+      fi
+      printf '%s\n' "$t3_bin" > "$t3_real_bin_file"
+      install_pairing_shim
+    elif [ -n "$existing_t3_pid" ]; then
       attempt=0
       while [ "$attempt" -lt 30 ]; do
         if is_healthy; then

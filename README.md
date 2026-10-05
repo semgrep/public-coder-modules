@@ -40,9 +40,13 @@ module "t3_server" {
 ```
 
 T3 is installed only when absent. Use `channel` (`stable` or `nightly`) to
-choose the first-install release train, or `t3_version` to pin an exact first
-install. The module leaves T3 state in `$HOME/.t3`, adds `$HOME/.local/bin` to
-the agent `PATH`, and records server logs at `$HOME/.t3/logs/server.log`.
+choose the release train on every start. It switches an existing installation
+only when the installed channel differs, including nightly back to stable;
+an unchanged channel does not trigger an upgrade. `t3_version` takes precedence
+on first install and disables later channel switching; it does not enforce an
+exact version after installation. The module leaves T3 state in `$HOME/.t3`,
+adds `$HOME/.local/bin` to the agent `PATH`, and records server logs at
+`$HOME/.t3/logs/server.log`.
 
 Repositories supplied through `initial_repositories` are cloned once into
 `$HOME/git/<directory>` and registered as T3 projects before the server starts.

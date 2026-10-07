@@ -48,6 +48,12 @@ exact version after installation. The module leaves T3 state in `$HOME/.t3`,
 adds `$HOME/.local/bin` to the agent `PATH`, and records server logs at
 `$HOME/.t3/logs/server.log`.
 
+Set `server_backend = "openrc"` to use an OpenRC user service with crash recovery
+instead of `nohup`. Add `log_directory = "/var/logs/t3"` and `log_rotation = {}`
+for timestamped logs rotated daily or at 10 MiB, retaining seven archives.
+The agent image must provide OpenRC and `svlogd`, and the log directory must be
+writable by the agent user. See the module README for image setup and operations.
+
 Repositories supplied through `initial_repositories` are cloned once into
 `$HOME/git/<directory>` and registered as T3 projects before the server starts.
 Each URL must be HTTPS and each directory must be a simple filename.

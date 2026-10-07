@@ -1,4 +1,6 @@
 terraform {
+  required_version = ">= 1.3"
+
   required_providers {
     coder = {
       source = "coder/coder"
@@ -21,6 +23,13 @@ resource "coder_script" "t3_server" {
   start_blocks_login = true
   timeout            = 300
 
+  lifecycle {
+    precondition {
+      condition     = var.log_rotation == null || var.server_backend == "openrc"
+      error_message = "log_rotation requires server_backend = openrc."
+    }
+  }
+
   # Install and start together: Terraform resource ordering does not order the
   # runtime execution of separate Coder scripts.
   script = <<-EOT
@@ -29,17 +38,32 @@ resource "coder_script" "t3_server" {
 
     export PATH="$HOME/.local/bin:$PATH"
     t3_home="$HOME/.t3"
-    log_dir="$t3_home/logs"
-    log_file="$log_dir/server.log"
+    log_dir="${var.log_directory == null ? "$HOME/.t3/logs" : var.log_directory}"
+    log_rotation="${var.log_rotation == null ? "false" : "true"}"
+    log_file="$log_dir/${var.log_rotation == null ? "server.log" : "current"}"
+    rotation_size="${var.log_rotation == null ? 10485760 : var.log_rotation.max_size_bytes}"
+    rotation_interval="${var.log_rotation == null ? 86400 : var.log_rotation.interval_seconds}"
+    rotation_retention="${var.log_rotation == null ? 7 : var.log_rotation.retained_files}"
     pid_file="$t3_home/server.pid"
+    server_backend="${var.server_backend}"
+    backend_file="$t3_home/server-backend"
     port="${var.port}"
     working_directory="${var.working_directory}"
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
     selected_channel="${var.channel}"
     exact_version="${var.t3_version == null ? "" : var.t3_version}"
 
-    mkdir -p "$log_dir"
+    mkdir -p "$t3_home" "$log_dir"
     chmod 700 "$t3_home" "$log_dir"
+    touch "$log_file"
+    chmod 600 "$log_file"
+
+    ${file("${path.module}/openrc.sh")}
+
+    previous_backend="$(cat "$backend_file" 2>/dev/null || true)"
+    if [ "$server_backend" = openrc ] || [ "$previous_backend" = openrc ]; then
+      setup_openrc
+    fi
 
     # T3 serves its web UI at /. There is no documented dedicated health
     # endpoint, so a successful, local HTTP response is the least fragile
@@ -177,10 +201,6 @@ resource "coder_script" "t3_server" {
       rm -f "$repositories_file"
     fi
 
-    if [ "$channel_switch_needed" = false ] && is_healthy; then
-      exit 0
-    fi
-
     existing_t3_pid=""
     if [ -f "$pid_file" ]; then
       pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -198,14 +218,7 @@ resource "coder_script" "t3_server" {
       esac
     fi
 
-    # A just-started server can still be becoming ready. Do not create a
-    # second instance when the PID file belongs to a live T3 server; wait for
-    # it instead. An unresponsive live process is left untouched rather than
-    # risking an unrelated PID or a user's in-flight work.
-    if [ "$channel_switch_needed" = true ]; then
-      # An update changes the launcher but leaves a manually started server
-      # running. Stop only the verified PID from this module, then wait for it
-      # to exit before replacing the binary or advertising the new channel.
+    stop_legacy_server() {
       if [ -n "$existing_t3_pid" ]; then
         kill "$existing_t3_pid"
         attempt=0
@@ -221,10 +234,36 @@ resource "coder_script" "t3_server" {
           exit 1
         fi
         rm -f "$pid_file"
-      elif is_healthy; then
-        echo "A server is already listening on port $port without a verified T3 PID; cannot switch channel safely" >&2
-        exit 1
+        existing_t3_pid=""
       fi
+    }
+
+    # Transfer ownership before readiness can short-circuit startup. Never
+    # leave a supervisor able to respawn a server owned by the other backend.
+    if [ "$server_backend" = nohup ]; then
+      stop_openrc
+    elif [ -n "$existing_t3_pid" ]; then
+      stop_legacy_server
+    fi
+    if [ "$server_backend" = openrc ] && [ "$openrc_config_changed" = true ]; then
+      stop_openrc
+      printf '%s\n' "$openrc_configuration" > "$openrc_config_dir/config-checksum"
+      chmod 600 "$openrc_config_dir/config-checksum"
+    fi
+
+    if [ "$channel_switch_needed" = false ] && is_healthy; then
+      if [ "$server_backend" = nohup ] || openrc_service t3-server status >/dev/null 2>&1; then
+        printf '%s\n' "$server_backend" > "$backend_file"
+        chmod 600 "$backend_file"
+        exit 0
+      fi
+      echo "A server is listening on port $port outside the OpenRC service; stop it before selecting OpenRC" >&2
+      exit 1
+    fi
+
+    if [ "$channel_switch_needed" = true ]; then
+      stop_openrc
+      stop_legacy_server
       if is_healthy; then
         echo "T3 Code is still responding on port $port after stopping its PID; cannot switch channel safely" >&2
         exit 1
@@ -264,23 +303,34 @@ resource "coder_script" "t3_server" {
 
     cd "$working_directory"
 
-    # nohup detaches the process from Coder's startup-script session; no
-    # systemd service is required in this Kubernetes container.
-    # `serve` writes headless pairing details to stdout. Keep stdout out of
-    # provisioning and persistent logs; users create pairing links themselves
-    # with `t3 pair` in an interactive shell.
-    nohup "$t3_bin" serve --host 127.0.0.1 --port "$port" "$working_directory" \
-      >/dev/null 2>>"$log_file" < /dev/null &
-    t3_pid=$!
-    printf '%s\n' "$t3_pid" > "$pid_file"
-    chmod 600 "$pid_file" "$log_file"
+    # `serve` prints pairing details to stdout. Both backends discard stdout
+    # and retain only private stderr; pairing remains an interactive action.
+    printf '%s\n' "$server_backend" > "$backend_file"
+    chmod 600 "$backend_file"
+    if [ "$server_backend" = openrc ]; then
+      if ! openrc_service t3-server status >/dev/null 2>&1; then
+        stop_openrc
+        openrc_service t3-server start
+      fi
+    else
+      nohup "$t3_bin" serve --host 127.0.0.1 --port "$port" "$working_directory" \
+        >/dev/null 2>>"$log_file" < /dev/null &
+      t3_pid=$!
+      printf '%s\n' "$t3_pid" > "$pid_file"
+      chmod 600 "$pid_file"
+    fi
 
     attempt=0
     while [ "$attempt" -lt 30 ]; do
       if is_healthy; then
         exit 0
       fi
-      if ! kill -0 "$t3_pid" 2>/dev/null; then
+      if [ "$server_backend" = openrc ]; then
+        if ! openrc_service t3-server status >/dev/null 2>&1; then
+          echo "T3 Code OpenRC service exited during startup; inspect $log_file" >&2
+          exit 1
+        fi
+      elif ! kill -0 "$t3_pid" 2>/dev/null; then
         rm -f "$pid_file"
         echo "T3 Code exited during startup; inspect $log_file" >&2
         exit 1

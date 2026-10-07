@@ -1,3 +1,5 @@
+mock_provider "coder" {}
+
 run "default_configuration" {
   command = plan
 
@@ -19,6 +21,82 @@ run "default_configuration" {
     condition     = coder_env.t3_path.merge_strategy == "prepend"
     error_message = "The T3 installation directory must be prepended to PATH."
   }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "server_backend=\"nohup\"")
+    error_message = "Existing users must retain the nohup backend by default."
+  }
+}
+
+run "openrc_configuration" {
+  command = plan
+
+  variables {
+    agent_id       = "test-agent-id"
+    server_backend = "openrc"
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "server_backend=\"openrc\"") && strcontains(coder_script.t3_server.script, "supervisor=supervise-daemon")
+    error_message = "OpenRC must select a supervised user service."
+  }
+}
+
+run "invalid_backend" {
+  command = plan
+
+  variables {
+    agent_id       = "test-agent-id"
+    server_backend = "systemd"
+  }
+
+  expect_failures = [var.server_backend]
+}
+
+run "rotating_logs" {
+  command = plan
+
+  variables {
+    agent_id       = "test-agent-id"
+    server_backend = "openrc"
+    log_directory  = "/var/logs/t3"
+    log_rotation   = {}
+  }
+
+  assert {
+    condition     = output.server_log_path == "/var/logs/t3/current"
+    error_message = "Rotated logs must report svlogd's active log in the configured directory."
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "rotation_interval=\"86400\"") && strcontains(coder_script.t3_server.script, "rotation_retention=\"7\"")
+    error_message = "Default rotation must be daily with seven retained archives."
+  }
+}
+
+run "rotation_requires_openrc" {
+  command = plan
+
+  variables {
+    agent_id     = "test-agent-id"
+    log_rotation = {}
+  }
+
+  expect_failures = [coder_script.t3_server]
+}
+
+run "invalid_rotation" {
+  command = plan
+
+  variables {
+    agent_id       = "test-agent-id"
+    server_backend = "openrc"
+    log_rotation = {
+      retained_files = 0
+    }
+  }
+
+  expect_failures = [var.log_rotation]
 }
 
 run "custom_configuration" {

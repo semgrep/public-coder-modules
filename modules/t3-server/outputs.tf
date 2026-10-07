@@ -9,6 +9,6 @@ output "port" {
 }
 
 output "server_log_path" {
-  description = "Persistent, private log file for the T3 Code server."
-  value       = "$HOME/.t3/logs/server.log"
+  description = "Active private stderr log file for the T3 Code server."
+  value       = "${var.log_directory == null ? "$HOME/.t3/logs" : var.log_directory}/${var.log_rotation == null ? "server.log" : "current"}"
 }

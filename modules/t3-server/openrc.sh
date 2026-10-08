@@ -41,14 +41,17 @@ setup_openrc() {
 
   # OpenRC needs private XDG paths; restore the agent's original paths only in
   # the child so providers still find their usual configuration and sockets.
+  # openrc-run also puts the system directories ahead of PATH, which would
+  # shadow user shims such as ~/.local/bin/gh; restore the agent's order too.
   printf '%s\n' "${XDG_CONFIG_HOME:-}" > "$openrc_config_dir/agent-config-home"
   printf '%s\n' "${XDG_RUNTIME_DIR:-}" > "$openrc_config_dir/agent-runtime-dir"
+  printf '%s\n' "$PATH" > "$openrc_config_dir/agent-path"
   printf '%s\n' "$port" > "$openrc_config_dir/port"
   printf '%s\n' "$working_directory" > "$openrc_config_dir/working-directory"
   printf '%s\n' "$log_dir" > "$openrc_config_dir/log-directory"
   printf '%s\n' "$log_file" > "$openrc_config_dir/log-file"
   printf '%s\n' "$log_rotation:$rotation_size:$rotation_interval:$rotation_retention" > "$openrc_config_dir/rotation-settings"
-  chmod 600 "$openrc_config_dir/agent-config-home" "$openrc_config_dir/agent-runtime-dir" "$openrc_config_dir/port" "$openrc_config_dir/working-directory" "$openrc_config_dir/log-directory" "$openrc_config_dir/log-file" "$openrc_config_dir/rotation-settings"
+  chmod 600 "$openrc_config_dir/agent-config-home" "$openrc_config_dir/agent-runtime-dir" "$openrc_config_dir/agent-path" "$openrc_config_dir/port" "$openrc_config_dir/working-directory" "$openrc_config_dir/log-directory" "$openrc_config_dir/log-file" "$openrc_config_dir/rotation-settings"
 
   if [ "$log_rotation" = true ]; then
     if ! command -v svlogd >/dev/null 2>&1; then
@@ -76,6 +79,8 @@ XDG_CONFIG_HOME="$(cat "$config_dir/agent-config-home")"
 XDG_RUNTIME_DIR="$(cat "$config_dir/agent-runtime-dir")"
 if [ -n "$XDG_CONFIG_HOME" ]; then export XDG_CONFIG_HOME; else unset XDG_CONFIG_HOME; fi
 if [ -n "$XDG_RUNTIME_DIR" ]; then export XDG_RUNTIME_DIR; else unset XDG_RUNTIME_DIR; fi
+PATH="$(cat "$config_dir/agent-path")"
+export PATH
 t3_bin="$(cat "$HOME/.t3/t3-real-bin")"
 port="$(cat "$config_dir/port")"
 working_directory="$(cat "$config_dir/working-directory")"
@@ -105,7 +110,7 @@ OPENRC_SERVICE
   fi
   chmod 700 "$openrc_config_dir/rc/init.d/t3-server"
 
-  openrc_configuration="$(cksum "$openrc_config_dir/rc/init.d/t3-server" "$openrc_config_dir/serve" "$openrc_config_dir/port" "$openrc_config_dir/working-directory" "$openrc_config_dir/log-file" "$openrc_config_dir/rotation-settings" "$openrc_config_dir/agent-config-home" "$openrc_config_dir/agent-runtime-dir" "$openrc_config_dir/rc/rc.conf")"
+  openrc_configuration="$(cksum "$openrc_config_dir/rc/init.d/t3-server" "$openrc_config_dir/serve" "$openrc_config_dir/port" "$openrc_config_dir/working-directory" "$openrc_config_dir/log-file" "$openrc_config_dir/rotation-settings" "$openrc_config_dir/agent-config-home" "$openrc_config_dir/agent-runtime-dir" "$openrc_config_dir/agent-path" "$openrc_config_dir/rc/rc.conf")"
   if [ "$openrc_configuration" != "$(cat "$openrc_config_dir/config-checksum" 2>/dev/null || true)" ]; then
     openrc_config_changed=true
   fi

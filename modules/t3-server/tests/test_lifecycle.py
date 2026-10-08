@@ -49,7 +49,7 @@ server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[sys.argv.index("--por
 with (state / "events").open("a") as f:
     f.write(json.dumps({"pid": os.getpid(), "channel": channel, "cwd": os.getcwd(),
         "token": os.environ.get("T3_TEST_TOKEN"), "config": os.environ.get("XDG_CONFIG_HOME"),
-        "runtime": os.environ.get("XDG_RUNTIME_DIR")}) + "\n")
+        "runtime": os.environ.get("XDG_RUNTIME_DIR"), "path": os.environ.get("PATH")}) + "\n")
 print("PAIRING_SECRET_SHOULD_NOT_BE_LOGGED", flush=True)
 print("server started", file=sys.stderr, flush=True)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -147,6 +147,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(event["cwd"], str(self.work))
         self.assertEqual(event["config"], self.env["XDG_CONFIG_HOME"])
         self.assertEqual(event["runtime"], self.env["XDG_RUNTIME_DIR"])
+        self.assertTrue(event["path"].startswith(f"{self.home}/.local/bin:"), event["path"])
         config = self.home / ".t3/openrc-config/rc/rc.conf"
         self.assertNotIn("test-secret-value", config.read_text())
         self.start("openrc")

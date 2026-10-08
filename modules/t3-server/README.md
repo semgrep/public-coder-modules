@@ -140,7 +140,9 @@ until the workspace has completed that startup so it can stop the old service.
 OpenRC preserves the Coder startup environment through an allowlist of variable
 names. Credential values remain in the process environment and are not written
 to service configuration. The child's original XDG configuration/runtime paths
-are restored so provider tools find their normal settings and sockets.
+are restored so provider tools find their normal settings and sockets, and so is
+its `PATH` order, which `openrc-run` would otherwise lead with the system
+directories, shadowing shims in `$HOME/.local/bin`.
 
 Use a dedicated log directory writable by the agent user. The module sets it
 to mode `0700`; do not point it at a shared directory such as `/var/log` itself.

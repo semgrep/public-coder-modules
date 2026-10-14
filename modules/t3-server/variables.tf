@@ -120,10 +120,10 @@ variable "initial_repositories" {
 }
 
 variable "provider_instances" {
-  description = "Additional T3 provider instances to register, keyed by instance id: the driver (for example claudeAgent or codex), a display name, and the provider binary path. Settings of these instances not named here, and all other instances, are left alone; instances this module created are removed from T3 once dropped from this map. Needs jq; without it, or with unreadable settings, startup warns and continues."
+  description = "T3 provider instances to register or retarget, keyed by instance id: the driver (for example claudeAgent or codex), the provider binary path, and optionally a display name. An id may be new or an existing instance such as T3's default claudeAgent. Other settings are left alone. When an id leaves this map, an instance the module created is removed and an existing one gets its original binary path back. Needs jq; without it, or with unreadable settings, startup warns and continues."
   type = map(object({
     driver       = string
-    display_name = string
+    display_name = optional(string)
     binary_path  = string
   }))
   default = {}

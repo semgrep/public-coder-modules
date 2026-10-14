@@ -150,10 +150,14 @@ run "provider_instances" {
   variables {
     agent_id = "agent-id"
     provider_instances = {
-      claudeDevcontainer = {
+      claudeAgent = {
+        driver      = "claudeAgent"
+        binary_path = "/usr/local/bin/claude-devcontainer"
+      }
+      claudeExtra = {
         driver       = "claudeAgent"
-        display_name = "Claude (devcontainer)"
-        binary_path  = "/usr/local/bin/claude-devcontainer"
+        display_name = "Claude (extra)"
+        binary_path  = "/opt/claude"
       }
     }
   }

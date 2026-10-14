@@ -204,12 +204,13 @@ resource "coder_script" "t3_server" {
 
     # Register the requested provider instances in T3's settings. T3 watches
     # the file, so a running server picks the change up; write it in place so
-    # the watched inode stays the same. The module owns only instances it
-    # created: those are removed once no longer requested, while a requested
-    # id that already existed is updated but never removed. Everything else is
-    # left as is. This is optional, so a failure (no jq, unreadable settings)
-    # only warns: each step is checked explicitly because errexit does not
-    # apply inside `||`.
+    # the watched inode stays the same. A requested id may be new or one of
+    # T3's existing instances (such as the default claudeAgent): the module
+    # records which, and the binary path it replaced, so an id later dropped
+    # from the map is deleted if the module created it and otherwise gets its
+    # original binary path back. Everything else is left as is. This is
+    # optional, so a failure (no jq, unreadable settings) only warns: each
+    # step is checked explicitly because errexit does not apply inside `||`.
     managed_instances_file="$t3_home/managed-provider-instances.json"
     settings_file="$t3_home/userdata/settings.json"
     register_provider_instances() {
@@ -222,18 +223,30 @@ resource "coder_script" "t3_server" {
       if [ -n "$provider_instances" ]; then
         desired_instances="$(printf '%s' "$provider_instances" | base64 -d)" || return 1
       fi
-      previous_instances="$(cat "$managed_instances_file" 2>/dev/null || printf '[]')"
+      previous_instances="$(cat "$managed_instances_file" 2>/dev/null || printf '{}')"
       update="$(jq -c --argjson desired "$desired_instances" --argjson previous "$previous_instances" '
         (.providerInstances // {}) as $existing
+        | ($desired | with_entries(
+            .key as $id
+            | .value = ($previous[$id] // (
+                if $existing | has($id)
+                then {created: false, previous_binary_path: $existing[$id].config.binaryPath}
+                else {created: true}
+                end)))) as $managed
         | {
-            managed: [$desired | keys[] | . as $id | select(($previous | index($id)) != null or ($existing | has($id) | not))],
+            managed: $managed,
             settings: (.providerInstances = (
-              $existing
-              | with_entries(select(.key as $id | ($previous | index($id)) == null or ($desired | has($id))))
+              reduce ($previous | to_entries[] | select(.key as $id | $desired | has($id) | not)) as $dropped ($existing;
+                if has($dropped.key) | not then .
+                elif $dropped.value.created then del(.[$dropped.key])
+                elif $dropped.value.previous_binary_path == null then del(.[$dropped.key].config.binaryPath)
+                else .[$dropped.key].config.binaryPath = $dropped.value.previous_binary_path
+                end)
               | reduce ($desired | to_entries[]) as $instance (.;
                   .[$instance.key] = (
                     (.[$instance.key] // {enabled: true})
-                    + {driver: $instance.value.driver, displayName: $instance.value.display_name}
+                    + {driver: $instance.value.driver}
+                    + (if $instance.value.display_name == null then {} else {displayName: $instance.value.display_name} end)
                     | .config = ((.config // {}) + {binaryPath: $instance.value.binary_path})
                   ))
             ))
@@ -242,7 +255,7 @@ resource "coder_script" "t3_server" {
       managed_instances="$(printf '%s' "$update" | jq -c '.managed')" || return 1
       [ -n "$updated_settings" ] && [ -n "$managed_instances" ] || return 1
       printf '%s\n' "$updated_settings" > "$settings_file" || return 1
-      if [ "$managed_instances" = "[]" ]; then
+      if [ "$managed_instances" = "{}" ]; then
         rm -f "$managed_instances_file"
       else
         printf '%s\n' "$managed_instances" > "$managed_instances_file" || return 1

@@ -106,8 +106,8 @@ resource "coder_script" "t3_server" {
     printf '%s\n' "${var.public_domain}" > "$public_domain_file"
     chmod 600 "$public_domain_file"
 
-    # The updater replaces ~/.local/bin/t3 with its own symlink. Restore the
-    # pairing shim after a channel change, using the newly installed target.
+    # (Re)write the pairing shim. Also run after a channel change, in case the
+    # updater replaced ~/.local/bin/t3 with its own symlink.
     install_pairing_shim() {
       rm -f "$t3_shim"
       cat > "$t3_shim" <<'EOF'
@@ -270,11 +270,14 @@ resource "coder_script" "t3_server" {
       fi
 
       "$t3_bin" update --channel "$selected_channel" --allow-downgrade --yes
-      if [ ! -L "$t3_shim" ]; then
-        echo "T3 update did not replace its launcher; cannot verify the selected channel" >&2
-        exit 1
+      # The updater repoints the launcher it was run from, which is
+      # ~/.local/bin/t3-real once the pairing shim has taken ~/.local/bin/t3,
+      # and leaves the shim alone. If it replaced ~/.local/bin/t3 instead,
+      # follow that. The version check below catches an update that did
+      # neither.
+      if [ -L "$t3_shim" ]; then
+        t3_bin="$(readlink -f "$t3_shim")"
       fi
-      t3_bin="$(readlink -f "$t3_shim")"
       updated_version="$("$t3_bin" --version)"
       if ! updated_channel="$(version_channel "$updated_version")" || [ "$updated_channel" != "$selected_channel" ]; then
         echo "T3 update did not select $selected_channel (got $updated_version)" >&2

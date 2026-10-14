@@ -22,7 +22,7 @@ FIXTURE = r'''#!/usr/bin/env python3
 import http.server, json, os, pathlib, signal, sys, time
 home = pathlib.Path(os.environ["T3_TEST_HOME"])
 state = home / ".t3"
-channel = "nightly" if "nightly" in sys.argv[0] else "stable"
+channel = "nightly" if "nightly" in os.path.realpath(sys.argv[0]) else "stable"
 if sys.argv[1] == "--version":
     print("t3 v1.2.3" + ("-nightly.1" if channel == "nightly" else ""))
     sys.exit(0)
@@ -35,9 +35,11 @@ if sys.argv[1] == "update":
         except FileNotFoundError:
             pass
     target = home / ("t3-" + sys.argv[sys.argv.index("--channel") + 1])
-    shim = home / ".local/bin/t3"
-    shim.unlink()
-    shim.symlink_to(target)
+    # Like the real updater: repoint the launcher this was run through.
+    launcher = pathlib.Path(sys.argv[0])
+    assert launcher.is_symlink(), launcher
+    launcher.unlink()
+    launcher.symlink_to(target)
     with (state / "updates").open("a") as f: f.write(str(target) + "\n")
     sys.exit(0)
 assert sys.argv[1] == "serve"

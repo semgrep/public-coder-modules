@@ -7,12 +7,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
-import { AuthUnavailable, createAdapter, LINEAR_URL } from '../scripts/linear-mcp.mjs';
+import { AuthUnavailable, authenticationUrl, createAdapter, LINEAR_URL } from '../scripts/linear-mcp.mjs';
 
-function fakeLinear() {
+function fakeLinear(accessMode = 'read-only') {
+  const endpoint = accessMode === 'read-only' ? LINEAR_URL : 'https://mcp.linear.app/mcp';
   const requests = [];
   const fetchImpl = async (url, options) => {
-    assert.equal(String(url), LINEAR_URL);
+    assert.equal(String(url), endpoint);
     assert.equal(options.redirect, 'error');
     requests.push({ method: options.method, token: options.headers.get('authorization') });
     if (options.method !== 'POST') return new Response(null, { status: 405 });
@@ -24,7 +25,10 @@ function fakeLinear() {
       capabilities: { tools: {} }, serverInfo: { name: 'fake-linear', version: '1' },
     };
     else if (message.method === 'tools/list') result = {
-      tools: [{ name: 'list_issues', description: 'Read issues', inputSchema: { type: 'object' } }],
+      tools: [
+        { name: 'list_issues', description: 'Read issues', inputSchema: { type: 'object' } },
+        ...(accessMode === 'read-write' ? [{ name: 'create_issue', inputSchema: { type: 'object' } }] : []),
+      ],
     };
     else result = { content: [{ type: 'text', text: 'Example issue' }] };
     return Response.json({ jsonrpc: '2.0', id: message.id, result });
@@ -134,4 +138,69 @@ test('actual stdio launcher remains healthy when the Coder subprocess is not aut
   await client.ping();
   await client.close();
   assert.equal(stderr, '');
+});
+
+for (const mode of ['read-only', 'read-write']) {
+  test(`${mode} selects its fixed official endpoint and corresponding tools`, async t => {
+    const remote = fakeLinear(mode);
+    const { client } = await connect(t, {
+      accessMode: mode, getToken: async () => 'fake-token', fetchImpl: remote.fetchImpl,
+    });
+    const names = (await client.listTools()).tools.map(tool => tool.name);
+    assert.deepEqual(names, mode === 'read-only' ? ['list_issues'] : ['list_issues', 'create_issue']);
+  });
+}
+
+test('invalid access modes cannot select an arbitrary endpoint', () => {
+  assert.throws(() => createAdapter({ accessMode: 'https://example.invalid' }), /Invalid Linear access mode/);
+});
+
+test('unlinked tool replies include Coder linking URL and diagnostics are emitted once', async t => {
+  const url = 'https://coder.example.test/external-auth/linear';
+  const messages = [];
+  const { adapter, client } = await connect(t, {
+    getToken: async () => { throw new AuthUnavailable(url); },
+    log: message => messages.push(message),
+    fetchImpl: async () => assert.fail('must not contact Linear'),
+  });
+  assert.deepEqual((await client.listTools()).tools, []);
+  const result = await client.callTool({ name: 'list_issues', arguments: {} });
+  assert.equal(result.isError, true);
+  assert.ok(result.content[0].text.includes(url));
+  await adapter.checkAuth();
+  await client.ping();
+  assert.deepEqual(messages, [`Linear MCP: link your account at ${url}`]);
+});
+
+test('authentication URL parsing strips queries and rejects arbitrary subprocess output', () => {
+  assert.equal(authenticationUrl('https://coder.example.test/external-auth/linear?secret=redacted#fragment', 'linear'),
+    'https://coder.example.test/external-auth/linear');
+  for (const output of ['sensitive-token', 'https://example.test/not-a-link',
+    'https://user:password@coder.example.test/external-auth/linear',
+    'Error: https://coder.example.test/external-auth/linear']) {
+    assert.equal(authenticationUrl(output, 'linear'), undefined);
+  }
+});
+
+test('real Coder CLI exit-one URL reaches the stdio tool result without leaking diagnostics', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'coder-linear-url-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fakeCoder = join(directory, 'coder');
+  await writeFile(fakeCoder, '#!/bin/sh\necho https://coder.example.test/external-auth/custom-linear?secret=redacted\necho sensitive-error >&2\nexit 1\n', { mode: 0o700 });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [new URL('../scripts/linear-mcp.mjs', import.meta.url).pathname, 'custom-linear'],
+    env: { GIT_ASKPASS: fakeCoder }, stderr: 'pipe',
+  });
+  let stderr = '';
+  transport.stderr.on('data', chunk => { stderr += chunk; });
+  const client = new Client({ name: 'url-test', version: '1' });
+  t.after(() => client.close());
+  await client.connect(transport);
+  const result = await client.callTool({ name: 'list_issues', arguments: {} });
+  assert.ok(result.content[0].text.includes('https://coder.example.test/external-auth/custom-linear'));
+  assert.ok(!result.content[0].text.includes('secret='));
+  await client.close();
+  assert.ok(stderr.includes('https://coder.example.test/external-auth/custom-linear'));
+  assert.ok(!stderr.includes('secret=') && !stderr.includes('sensitive-error'));
 });

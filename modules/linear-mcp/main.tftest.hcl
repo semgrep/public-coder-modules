@@ -19,6 +19,17 @@ run "defaults" {
   }
 }
 
+run "default_read_only" {
+  command = plan
+  variables {
+    agent_id = "test-agent"
+  }
+  assert {
+    condition     = strcontains(coder_script.linear_mcp.script, "'linear' 'read-only'")
+    error_message = "Existing consumers must retain read-only access by default."
+  }
+}
+
 run "custom_provider" {
   command = plan
   variables {
@@ -38,4 +49,25 @@ run "reject_shell_characters" {
     external_auth_id = "linear;false"
   }
   expect_failures = [var.external_auth_id]
+}
+
+run "read_write_mode" {
+  command = plan
+  variables {
+    agent_id    = "test-agent"
+    access_mode = "read-write"
+  }
+  assert {
+    condition     = strcontains(coder_script.linear_mcp.script, "'linear' 'read-write'")
+    error_message = "The launcher must pass the selected access mode to the adapter."
+  }
+}
+
+run "reject_invalid_mode" {
+  command = plan
+  variables {
+    agent_id    = "test-agent"
+    access_mode = "custom-url"
+  }
+  expect_failures = [var.access_mode]
 }

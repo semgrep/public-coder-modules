@@ -64,7 +64,7 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
-| `provider_instances` | Additional T3 provider instances keyed by instance id: `driver`, `display_name` and absolute `binary_path`. Requires `jq` when non-empty. | `map(object({ driver = string, display_name = string, binary_path = string }))` | `{}` | no |
+| `provider_instances` | Additional T3 provider instances keyed by instance id: `driver`, `display_name` and absolute `binary_path`. Needs `jq`; registration is best effort. | `map(object({ driver = string, display_name = string, binary_path = string }))` | `{}` | no |
 
 ## Outputs
 
@@ -136,7 +136,9 @@ and leaves its other settings, including `enabled`, as the user left them. It
 records the ids it manages in `$HOME/.t3/managed-provider-instances.json` and
 removes an instance when its id leaves the map; instances it did not add are
 never touched. T3 watches its settings file, so a running server picks the
-change up without a restart.
+change up without a restart. Registration is best effort: if `jq` is missing or
+the settings file cannot be parsed, startup logs a warning and T3 starts
+unchanged.
 
 ## OpenRC supervision and rotating logs
 

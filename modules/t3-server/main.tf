@@ -205,19 +205,20 @@ resource "coder_script" "t3_server" {
     # Register the requested provider instances in T3's settings. T3 watches
     # the file, so a running server picks the change up; write it in place so
     # the watched inode stays the same. Instances this module added earlier
-    # but no longer requests are removed; everything else is left as is.
+    # but no longer requests are removed; everything else is left as is. This
+    # is optional, so a failure (no jq, unreadable settings) only warns: each
+    # step is checked explicitly because errexit does not apply inside `||`.
     managed_instances_file="$t3_home/managed-provider-instances.json"
-    if [ -n "$provider_instances" ] || [ -f "$managed_instances_file" ]; then
-      if ! command -v jq >/dev/null 2>&1; then
-        echo "provider_instances requires jq" >&2
-        exit 1
+    settings_file="$t3_home/userdata/settings.json"
+    register_provider_instances() {
+      command -v jq >/dev/null 2>&1 || { echo "provider_instances requires jq" >&2; return 1; }
+      mkdir -p "$t3_home/userdata" || return 1
+      if [ ! -s "$settings_file" ]; then
+        printf '{}\n' > "$settings_file" || return 1
       fi
-      settings_file="$t3_home/userdata/settings.json"
-      mkdir -p "$t3_home/userdata"
-      [ -s "$settings_file" ] || printf '{}\n' > "$settings_file"
       desired_instances="{}"
       if [ -n "$provider_instances" ]; then
-        desired_instances="$(printf '%s' "$provider_instances" | base64 -d)"
+        desired_instances="$(printf '%s' "$provider_instances" | base64 -d)" || return 1
       fi
       previous_instances="$(cat "$managed_instances_file" 2>/dev/null || printf '[]')"
       updated_settings="$(jq --argjson desired "$desired_instances" --argjson previous "$previous_instances" '
@@ -230,10 +231,14 @@ resource "coder_script" "t3_server" {
                 + {driver: $instance.value.driver, displayName: $instance.value.display_name}
                 | .config = ((.config // {}) + {binaryPath: $instance.value.binary_path})
               ))
-        )' "$settings_file")"
-      printf '%s\n' "$updated_settings" > "$settings_file"
-      printf '%s' "$desired_instances" | jq -c 'keys' > "$managed_instances_file"
+        )' "$settings_file")" || return 1
+      [ -n "$updated_settings" ] || return 1
+      printf '%s\n' "$updated_settings" > "$settings_file" || return 1
+      printf '%s' "$desired_instances" | jq -c 'keys' > "$managed_instances_file" || return 1
       chmod 600 "$managed_instances_file"
+    }
+    if [ -n "$provider_instances" ] || [ -f "$managed_instances_file" ]; then
+      register_provider_instances || echo "Could not update T3 provider instances in $settings_file; starting T3 without the change" >&2
     fi
 
     existing_t3_pid=""

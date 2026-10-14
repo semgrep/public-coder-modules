@@ -12,7 +12,25 @@ import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode } fr
 const run = promisify(execFile);
 export const LINEAR_URL = 'https://mcp.linear.app/mcp/readonly';
 const endpoints = new Map([['read-only', LINEAR_URL], ['read-write', 'https://mcp.linear.app/mcp']]);
-export class AuthUnavailable extends Error {}
+export class AuthUnavailable extends Error {
+  constructor(authUrl) {
+    super('Linear authentication unavailable');
+    this.authUrl = authUrl;
+  }
+}
+
+export function authenticationUrl(stdout, providerId) {
+  try {
+    const url = new URL(stdout.trim());
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password ||
+        url.pathname !== `/external-auth/${providerId}`) return undefined;
+    // Only return the Coder linking page, never query parameters or raw
+    // subprocess output that could contain credentials or diagnostics.
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  } catch { return undefined; }
+}
 
 export async function coderToken(providerId) {
   try {
@@ -21,13 +39,14 @@ export async function coderToken(providerId) {
     const token = stdout.trim();
     if (!token || /\s/.test(token)) throw new AuthUnavailable();
     return token;
-  } catch {
-    // Subprocess errors may contain stdout/stderr with sensitive credentials.
-    throw new AuthUnavailable();
+  } catch (error) {
+    // Coder prints the linking URL to stdout and exits 1 when unlinked.
+    // Parse only that exact URL shape; never relay raw stdout/stderr.
+    throw new AuthUnavailable(authenticationUrl(error.stdout || '', providerId));
   }
 }
 
-export function createAdapter({ providerId = 'linear', accessMode = 'read-only', getToken = () => coderToken(providerId), fetchImpl = fetch } = {}) {
+export function createAdapter({ providerId = 'linear', accessMode = 'read-only', getToken = () => coderToken(providerId), fetchImpl = fetch, log = message => console.error(message) } = {}) {
   const upstreamUrl = endpoints.get(accessMode);
   if (!upstreamUrl) throw new Error('Invalid Linear access mode');
   const server = new Server({ name: 'coder-linear-mcp', version: '1.0.0' }, {
@@ -39,6 +58,7 @@ export function createAdapter({ providerId = 'linear', accessMode = 'read-only',
   let closed = false;
   let poll;
   let shutdownPromise;
+  let reportedAuthUrl;
   const notify = () => {
     if (initialized && !closed) server.sendToolListChanged().catch(() => {});
   };
@@ -88,9 +108,18 @@ export function createAdapter({ providerId = 'linear', accessMode = 'read-only',
     })().finally(() => { connecting = undefined; });
     return connecting;
   };
+  const reportAuth = error => {
+    if (error instanceof AuthUnavailable && error.authUrl && error.authUrl !== reportedAuthUrl) {
+      reportedAuthUrl = error.authUrl;
+      log(`Linear MCP: link your account at ${error.authUrl}`);
+    }
+  };
   const unavailable = async error => {
     await disconnect();
-    if (error instanceof AuthUnavailable) return true;
+    if (error instanceof AuthUnavailable) {
+      reportAuth(error);
+      return true;
+    }
     // Avoid returning SDK errors or upstream response bodies to the client.
     throw new McpError(ErrorCode.InternalError, 'Linear MCP is temporarily unavailable. Try again later.');
   };
@@ -107,14 +136,16 @@ export function createAdapter({ providerId = 'linear', accessMode = 'read-only',
     } catch (error) {
       if (await unavailable(error)) return {
         isError: true,
-        content: [{ type: 'text', text: 'Link Linear in Coder to use Linear tools. Authentication is optional for this workspace.' }],
+        content: [{ type: 'text', text: error.authUrl
+          ? `Open ${error.authUrl} to link Linear in Coder, then retry. Authentication is optional for this workspace.`
+          : `Link Linear in Coder to use Linear tools. Run \`coder external-auth access-token ${providerId}\` in the workspace to obtain the authentication URL. Authentication is optional for this workspace.` }],
       };
     }
   });
   // Clients can discover newly linked accounts without restarting. Also
   // detect account removal while idle; revoked tokens are caught by fetch.
   const checkAuth = async () => {
-    try { await ensureClient(); } catch { await disconnect(); }
+    try { await ensureClient(); } catch (error) { reportAuth(error); await disconnect(); }
   };
   server.oninitialized = () => {
     initialized = true;

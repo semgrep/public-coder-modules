@@ -62,8 +62,12 @@ permissions. Restart MCP clients after changing mode so they rediscover tools.
 
 Without a linked account, MCP initialization and ping succeed, `tools/list`
 returns an empty list, and nothing is sent to Linear. The server stays running
-without printing an authentication error. A stale tool call returns a normal
-MCP tool result with `isError: true` explaining how to link Linear.
+without failing authentication. When Coder supplies an account-linking URL,
+the adapter prints that URL once to stderr, and a stale tool call returns a
+normal MCP tool result with `isError: true` containing the URL to open. Only
+the Coder linking page is retained; query parameters and raw subprocess errors
+are never printed. If the credential context is unavailable and Coder cannot
+supply a URL, the reply gives the CLI command to retrieve it.
 
 The adapter checks authentication every 30 seconds. After linking Linear in
 Coder, it sends `notifications/tools/list_changed` when tools become available.

@@ -1,15 +1,17 @@
-# Linear read-only MCP
+# Linear MCP
 
-Installs a stdio MCP adapter that connects to [Linear's official read-only
-MCP endpoint](https://linear.app/docs/mcp), using the workspace owner's Coder
-external-auth token. It exposes Linear's read tools to Claude Code, Codex, or
+Installs a stdio MCP adapter that connects to [Linear's official
+MCP endpoints](https://linear.app/docs/mcp), using the workspace owner's Coder
+external-auth token. It exposes Linear's tools to Claude Code, Codex, or
 other MCP clients without a second OAuth login.
 
 ## Usage
 
 Configure a Linear OAuth external-auth provider on the Coder deployment first.
 The module does not provision OAuth applications, client secrets, or account
-links. Linear API authorization uses OAuth 2.0; request the `read` scope.
+links. Linear API authorization uses OAuth 2.0. Request `read` for read-only use,
+or `read,write` to enable writes. Existing grants need reauthorization when
+adding write scope.
 
 ```hcl
 data "coder_external_auth" "linear" {
@@ -21,6 +23,7 @@ module "linear_mcp" {
   source           = "./modules/linear-mcp"
   agent_id         = coder_agent.main.id
   external_auth_id = "linear"
+  access_mode      = "read-only" # Set read-write to enable write tools.
 }
 ```
 
@@ -46,6 +49,14 @@ command = "coder-linear-mcp"
 Client registration remains the calling template's responsibility. Registration
 applies to the agent on which the module runs; clients in another container need
 access to the executable, dependencies, and Coder credential context.
+
+## Access mode
+
+`read-only` (the default) selects `https://mcp.linear.app/mcp/readonly`, which
+exposes only read tools even when the token permits writes. `read-write`
+selects `https://mcp.linear.app/mcp`; writes also require a write-capable OAuth
+grant. This setting controls MCP access, not the Coder token's underlying
+permissions. Restart MCP clients after changing mode so they rediscover tools.
 
 ## Optional authentication
 
@@ -75,7 +86,7 @@ Runtime requires Coder's workspace credential context and CLI, available through
 `GIT_ASKPASS` or PATH. Each upstream HTTP request retrieves a current token with
 `coder external-auth access-token <external_auth_id>`; Coder handles refresh.
 The module stores no access or refresh tokens in Terraform, client config,
-files, or command arguments. It uses a fixed read-only endpoint, rejects
+files, or command arguments. It uses only the selected official endpoint, rejects
 redirects, and never starts a separate browser OAuth flow. The SDK dependency
 lockfile contains only public package locations and integrity hashes.
 
@@ -83,8 +94,9 @@ lockfile contains only public package locations and integrity hashes.
 | --- | --- | --- |
 | `agent_id` | Required | Coder agent receiving the installer and PATH entry |
 | `external_auth_id` | `linear` | Linear external-auth provider ID in Coder |
+| `access_mode` | `read-only` | `read-only` or `read-write` MCP endpoint |
 
-Outputs: `launcher_command` is the PATH command; `launcher_path` is its
+Outputs: `access_mode` is the selected mode; `launcher_command` is the PATH command; `launcher_path` is its
 `$HOME`-relative location (expand HOME before using it as an absolute command).
 
 ## Validation

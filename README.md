@@ -95,11 +95,13 @@ module "git_credential_coder" {
 
 ## `linear-mcp`
 
-[`modules/linear-mcp`](modules/linear-mcp) installs a Linear read-only MCP
+[`modules/linear-mcp`](modules/linear-mcp) installs a Linear MCP
 launcher backed by Coder external authentication. Unlinked accounts keep a
 healthy MCP connection with an empty tool list; tools become available after
 linking the account. The module installs the adapter and exposes its launcher
 command; the calling template registers it in its coding clients.
+`access_mode` defaults to `read-only`; choose `read-write` to expose write tools
+with a write-capable OAuth grant.
 
 ```hcl
 module "linear_mcp" {

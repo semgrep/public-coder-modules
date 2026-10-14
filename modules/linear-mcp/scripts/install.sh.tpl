@@ -28,7 +28,7 @@ ADAPTER
 cat > "$HOME/.local/bin/coder-linear-mcp" <<'LAUNCHER'
 #!/bin/sh
 exec "$HOME/.local/share/coder-linear-mcp/pnpm/bin/node" \
-  "$HOME/.local/share/coder-linear-mcp/app/linear-mcp.mjs" '${external_auth_id}'
+  "$HOME/.local/share/coder-linear-mcp/app/linear-mcp.mjs" '${external_auth_id}' '${access_mode}'
 LAUNCHER
 chmod 0755 "$HOME/.local/bin/coder-linear-mcp"
-echo 'Linear read-only MCP installed; unlinked accounts expose no tools.'
+echo 'Linear MCP installed (${access_mode}); unlinked accounts expose no tools.'

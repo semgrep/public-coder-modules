@@ -11,6 +11,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode } fr
 
 const run = promisify(execFile);
 export const LINEAR_URL = 'https://mcp.linear.app/mcp/readonly';
+const endpoints = new Map([['read-only', LINEAR_URL], ['read-write', 'https://mcp.linear.app/mcp']]);
 export class AuthUnavailable extends Error {}
 
 export async function coderToken(providerId) {
@@ -26,7 +27,9 @@ export async function coderToken(providerId) {
   }
 }
 
-export function createAdapter({ providerId = 'linear', getToken = () => coderToken(providerId), fetchImpl = fetch } = {}) {
+export function createAdapter({ providerId = 'linear', accessMode = 'read-only', getToken = () => coderToken(providerId), fetchImpl = fetch } = {}) {
+  const upstreamUrl = endpoints.get(accessMode);
+  if (!upstreamUrl) throw new Error('Invalid Linear access mode');
   const server = new Server({ name: 'coder-linear-mcp', version: '1.0.0' }, {
     capabilities: { tools: { listChanged: true } },
   });
@@ -49,8 +52,8 @@ export function createAdapter({ providerId = 'linear', getToken = () => coderTok
   };
   const authenticatedFetch = async (url, options) => {
     // No configurable upstream and no redirects: credentials go only to the
-    // official read-only endpoint. No OAuth provider/browser flow is used.
-    if (String(url) !== LINEAR_URL) throw new Error('Unexpected MCP endpoint');
+    // selected official endpoint. No OAuth provider/browser flow is used.
+    if (String(url) !== upstreamUrl) throw new Error('Unexpected MCP endpoint');
     const token = await getToken();
     const headers = new Headers(options?.headers);
     headers.set('authorization', `Bearer ${token}`);
@@ -70,7 +73,7 @@ export function createAdapter({ providerId = 'linear', getToken = () => coderTok
     if (!connecting) connecting = (async () => {
       const candidate = new Client({ name: 'coder-linear-mcp', version: '1.0.0' });
       try {
-        await candidate.connect(new StreamableHTTPClientTransport(new URL(LINEAR_URL), {
+        await candidate.connect(new StreamableHTTPClientTransport(new URL(upstreamUrl), {
           fetch: authenticatedFetch,
           reconnectionOptions: { maxRetries: 0 },
         }));
@@ -133,7 +136,7 @@ export function createAdapter({ providerId = 'linear', getToken = () => coderTok
 async function main() {
   const providerId = process.argv[2] || 'linear';
   if (!/^[a-z0-9][a-z0-9-]*$/.test(providerId)) throw new Error('Invalid provider ID');
-  const adapter = createAdapter({ providerId });
+  const adapter = createAdapter({ providerId, accessMode: process.argv[3] || 'read-only' });
   await adapter.server.connect(new StdioServerTransport());
   process.stdin.once('end', () => { adapter.close(); });
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {

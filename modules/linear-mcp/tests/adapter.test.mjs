@@ -9,10 +9,11 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { AuthUnavailable, createAdapter, LINEAR_URL } from '../scripts/linear-mcp.mjs';
 
-function fakeLinear() {
+function fakeLinear(accessMode = 'read-only') {
+  const endpoint = accessMode === 'read-only' ? LINEAR_URL : 'https://mcp.linear.app/mcp';
   const requests = [];
   const fetchImpl = async (url, options) => {
-    assert.equal(String(url), LINEAR_URL);
+    assert.equal(String(url), endpoint);
     assert.equal(options.redirect, 'error');
     requests.push({ method: options.method, token: options.headers.get('authorization') });
     if (options.method !== 'POST') return new Response(null, { status: 405 });
@@ -24,7 +25,10 @@ function fakeLinear() {
       capabilities: { tools: {} }, serverInfo: { name: 'fake-linear', version: '1' },
     };
     else if (message.method === 'tools/list') result = {
-      tools: [{ name: 'list_issues', description: 'Read issues', inputSchema: { type: 'object' } }],
+      tools: [
+        { name: 'list_issues', description: 'Read issues', inputSchema: { type: 'object' } },
+        ...(accessMode === 'read-write' ? [{ name: 'create_issue', inputSchema: { type: 'object' } }] : []),
+      ],
     };
     else result = { content: [{ type: 'text', text: 'Example issue' }] };
     return Response.json({ jsonrpc: '2.0', id: message.id, result });
@@ -134,4 +138,19 @@ test('actual stdio launcher remains healthy when the Coder subprocess is not aut
   await client.ping();
   await client.close();
   assert.equal(stderr, '');
+});
+
+for (const mode of ['read-only', 'read-write']) {
+  test(`${mode} selects its fixed official endpoint and corresponding tools`, async t => {
+    const remote = fakeLinear(mode);
+    const { client } = await connect(t, {
+      accessMode: mode, getToken: async () => 'fake-token', fetchImpl: remote.fetchImpl,
+    });
+    const names = (await client.listTools()).tools.map(tool => tool.name);
+    assert.deepEqual(names, mode === 'read-only' ? ['list_issues'] : ['list_issues', 'create_issue']);
+  });
+}
+
+test('invalid access modes cannot select an arbitrary endpoint', () => {
+  assert.throws(() => createAdapter({ accessMode: 'https://example.invalid' }), /Invalid Linear access mode/);
 });

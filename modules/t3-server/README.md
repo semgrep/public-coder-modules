@@ -133,9 +133,10 @@ module "t3_server" {
 
 The module sets each instance's `driver`, `displayName` and `config.binaryPath`
 and leaves its other settings, including `enabled`, as the user left them. It
-records the ids it manages in `$HOME/.t3/managed-provider-instances.json` and
-removes an instance when its id leaves the map; instances it did not add are
-never touched. T3 watches its settings file, so a running server picks the
+records the ids it created in `$HOME/.t3/managed-provider-instances.json` and
+removes such an instance when its id leaves the map. A requested id that
+already existed is updated but never removed, and other instances are never
+touched. The record is deleted once the module manages nothing. T3 watches its settings file, so a running server picks the
 change up without a restart. Registration is best effort: if `jq` is missing or
 the settings file cannot be parsed, startup logs a warning and T3 starts
 unchanged.

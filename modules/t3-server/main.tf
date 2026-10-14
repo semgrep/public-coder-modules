@@ -204,10 +204,12 @@ resource "coder_script" "t3_server" {
 
     # Register the requested provider instances in T3's settings. T3 watches
     # the file, so a running server picks the change up; write it in place so
-    # the watched inode stays the same. Instances this module added earlier
-    # but no longer requests are removed; everything else is left as is. This
-    # is optional, so a failure (no jq, unreadable settings) only warns: each
-    # step is checked explicitly because errexit does not apply inside `||`.
+    # the watched inode stays the same. The module owns only instances it
+    # created: those are removed once no longer requested, while a requested
+    # id that already existed is updated but never removed. Everything else is
+    # left as is. This is optional, so a failure (no jq, unreadable settings)
+    # only warns: each step is checked explicitly because errexit does not
+    # apply inside `||`.
     managed_instances_file="$t3_home/managed-provider-instances.json"
     settings_file="$t3_home/userdata/settings.json"
     register_provider_instances() {
@@ -221,21 +223,31 @@ resource "coder_script" "t3_server" {
         desired_instances="$(printf '%s' "$provider_instances" | base64 -d)" || return 1
       fi
       previous_instances="$(cat "$managed_instances_file" 2>/dev/null || printf '[]')"
-      updated_settings="$(jq --argjson desired "$desired_instances" --argjson previous "$previous_instances" '
-        .providerInstances = (
-          (.providerInstances // {})
-          | with_entries(select(.key as $id | ($previous | index($id)) == null or ($desired | has($id))))
-          | reduce ($desired | to_entries[]) as $instance (.;
-              .[$instance.key] = (
-                (.[$instance.key] // {enabled: true})
-                + {driver: $instance.value.driver, displayName: $instance.value.display_name}
-                | .config = ((.config // {}) + {binaryPath: $instance.value.binary_path})
-              ))
-        )' "$settings_file")" || return 1
-      [ -n "$updated_settings" ] || return 1
+      update="$(jq -c --argjson desired "$desired_instances" --argjson previous "$previous_instances" '
+        (.providerInstances // {}) as $existing
+        | {
+            managed: [$desired | keys[] | . as $id | select(($previous | index($id)) != null or ($existing | has($id) | not))],
+            settings: (.providerInstances = (
+              $existing
+              | with_entries(select(.key as $id | ($previous | index($id)) == null or ($desired | has($id))))
+              | reduce ($desired | to_entries[]) as $instance (.;
+                  .[$instance.key] = (
+                    (.[$instance.key] // {enabled: true})
+                    + {driver: $instance.value.driver, displayName: $instance.value.display_name}
+                    | .config = ((.config // {}) + {binaryPath: $instance.value.binary_path})
+                  ))
+            ))
+          }' "$settings_file")" || return 1
+      updated_settings="$(printf '%s' "$update" | jq '.settings')" || return 1
+      managed_instances="$(printf '%s' "$update" | jq -c '.managed')" || return 1
+      [ -n "$updated_settings" ] && [ -n "$managed_instances" ] || return 1
       printf '%s\n' "$updated_settings" > "$settings_file" || return 1
-      printf '%s' "$desired_instances" | jq -c 'keys' > "$managed_instances_file" || return 1
-      chmod 600 "$managed_instances_file"
+      if [ "$managed_instances" = "[]" ]; then
+        rm -f "$managed_instances_file"
+      else
+        printf '%s\n' "$managed_instances" > "$managed_instances_file" || return 1
+        chmod 600 "$managed_instances_file"
+      fi
     }
     if [ -n "$provider_instances" ] || [ -f "$managed_instances_file" ]; then
       register_provider_instances || echo "Could not update T3 provider instances in $settings_file; starting T3 without the change" >&2

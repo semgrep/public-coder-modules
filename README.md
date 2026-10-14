@@ -110,3 +110,23 @@ module "linear_mcp" {
   external_auth_id = "linear"
 }
 ```
+
+## `slack-mcp`
+
+[`modules/slack-mcp`](modules/slack-mcp) installs a Slack MCP launcher backed
+by Coder external authentication. Read-only is the default: an explicit tool
+allowlist filters discovery and rejects write calls before forwarding them.
+Unlinked accounts keep a healthy empty MCP and receive Coder linking guidance.
+
+```hcl
+module "slack_mcp" {
+  source           = "./modules/slack-mcp"
+  agent_id         = coder_agent.main.id
+  external_auth_id = "slack"
+  access_mode      = "read-only"
+}
+```
+
+Register the exported launcher command in your clients. Choose `read-write`
+to expose all tools permitted by the Slack grant. See the module README for
+Codex environment forwarding and runtime requirements.

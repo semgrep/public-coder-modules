@@ -143,3 +143,53 @@ run "custom_configuration" {
     error_message = "The pairing shim must rewrite loopback pairing URLs to the public domain."
   }
 }
+
+run "provider_instances" {
+  command = plan
+
+  variables {
+    agent_id = "agent-id"
+    provider_instances = {
+      claudeDevcontainer = {
+        driver       = "claudeAgent"
+        display_name = "Claude (devcontainer)"
+        binary_path  = "/usr/local/bin/claude-devcontainer"
+      }
+    }
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "provider_instances=\"${base64encode(jsonencode(var.provider_instances))}\"")
+    error_message = "Requested provider instances must be passed to the startup script."
+  }
+}
+
+run "no_provider_instances" {
+  command = plan
+
+  variables {
+    agent_id = "agent-id"
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "provider_instances=\"\"")
+    error_message = "Without provider instances the startup script must only clean up earlier ones."
+  }
+}
+
+run "invalid_provider_instance" {
+  command = plan
+
+  variables {
+    agent_id = "agent-id"
+    provider_instances = {
+      "bad id" = {
+        driver       = "claudeAgent"
+        display_name = "Bad"
+        binary_path  = "relative/claude"
+      }
+    }
+  }
+
+  expect_failures = [var.provider_instances]
+}

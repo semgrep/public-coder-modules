@@ -52,6 +52,7 @@ resource "coder_script" "t3_server" {
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
     selected_channel="${var.channel}"
     exact_version="${var.t3_version == null ? "" : var.t3_version}"
+    provider_instances="${length(var.provider_instances) == 0 ? "" : base64encode(jsonencode(var.provider_instances))}"
 
     mkdir -p "$t3_home" "$log_dir"
     chmod 700 "$t3_home" "$log_dir"
@@ -199,6 +200,40 @@ resource "coder_script" "t3_server" {
         fi
       done < "$repositories_file"
       rm -f "$repositories_file"
+    fi
+
+    # Register the requested provider instances in T3's settings. T3 watches
+    # the file, so a running server picks the change up; write it in place so
+    # the watched inode stays the same. Instances this module added earlier
+    # but no longer requests are removed; everything else is left as is.
+    managed_instances_file="$t3_home/managed-provider-instances.json"
+    if [ -n "$provider_instances" ] || [ -f "$managed_instances_file" ]; then
+      if ! command -v jq >/dev/null 2>&1; then
+        echo "provider_instances requires jq" >&2
+        exit 1
+      fi
+      settings_file="$t3_home/userdata/settings.json"
+      mkdir -p "$t3_home/userdata"
+      [ -s "$settings_file" ] || printf '{}\n' > "$settings_file"
+      desired_instances="{}"
+      if [ -n "$provider_instances" ]; then
+        desired_instances="$(printf '%s' "$provider_instances" | base64 -d)"
+      fi
+      previous_instances="$(cat "$managed_instances_file" 2>/dev/null || printf '[]')"
+      updated_settings="$(jq --argjson desired "$desired_instances" --argjson previous "$previous_instances" '
+        .providerInstances = (
+          (.providerInstances // {})
+          | with_entries(select(.key as $id | ($previous | index($id)) == null or ($desired | has($id))))
+          | reduce ($desired | to_entries[]) as $instance (.;
+              .[$instance.key] = (
+                (.[$instance.key] // {enabled: true})
+                + {driver: $instance.value.driver, displayName: $instance.value.display_name}
+                | .config = ((.config // {}) + {binaryPath: $instance.value.binary_path})
+              ))
+        )' "$settings_file")"
+      printf '%s\n' "$updated_settings" > "$settings_file"
+      printf '%s' "$desired_instances" | jq -c 'keys' > "$managed_instances_file"
+      chmod 600 "$managed_instances_file"
     fi
 
     existing_t3_pid=""

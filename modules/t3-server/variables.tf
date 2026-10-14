@@ -118,3 +118,23 @@ variable "initial_repositories" {
     error_message = "Each initial repository must use an HTTPS URL and a simple directory name."
   }
 }
+
+variable "provider_instances" {
+  description = "Additional T3 provider instances to register, keyed by instance id: the driver (for example claudeAgent or codex), a display name, and the provider binary path. Settings of these instances not named here, and all other instances, are left alone; instances later removed from this map are removed from T3. Requires jq when non-empty."
+  type = map(object({
+    driver       = string
+    display_name = string
+    binary_path  = string
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for id, instance in var.provider_instances :
+      can(regex("^[A-Za-z][A-Za-z0-9_-]{0,63}$", id)) &&
+      can(regex("^[A-Za-z][A-Za-z0-9_-]{0,63}$", instance.driver)) &&
+      startswith(instance.binary_path, "/")
+    ])
+    error_message = "provider_instances keys and drivers must be T3 slugs (a letter, then letters, digits, - or _), and binary_path must be absolute."
+  }
+}

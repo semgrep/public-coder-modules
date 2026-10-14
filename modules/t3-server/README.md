@@ -64,6 +64,7 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
+| `provider_instances` | Additional T3 provider instances keyed by instance id: `driver`, `display_name` and absolute `binary_path`. Requires `jq` when non-empty. | `map(object({ driver = string, display_name = string, binary_path = string }))` | `{}` | no |
 
 ## Outputs
 
@@ -107,6 +108,35 @@ To pair a native client, run `t3 pair` interactively in the workspace. When
 the pairing URL to `https://<public_domain>`; configure that domain to proxy to
 this app before sharing a link. Do not put pairing URLs in provisioning scripts
 or logs.
+
+## Extra provider instances
+
+T3 can run several instances of one provider driver, each with its own binary.
+`provider_instances` registers instances in `$HOME/.t3/userdata/settings.json`
+on every start, for example a Claude Code instance whose binary is a wrapper
+that runs the CLI somewhere else:
+
+```hcl
+module "t3_server" {
+  source = "./modules/t3-server"
+
+  agent_id = coder_agent.main.id
+  provider_instances = {
+    claudeDevcontainer = {
+      driver       = "claudeAgent"
+      display_name = "Claude (devcontainer)"
+      binary_path  = "/usr/local/bin/claude-devcontainer"
+    }
+  }
+}
+```
+
+The module sets each instance's `driver`, `displayName` and `config.binaryPath`
+and leaves its other settings, including `enabled`, as the user left them. It
+records the ids it manages in `$HOME/.t3/managed-provider-instances.json` and
+removes an instance when its id leaves the map; instances it did not add are
+never touched. T3 watches its settings file, so a running server picks the
+change up without a restart.
 
 ## OpenRC supervision and rotating logs
 

@@ -92,3 +92,19 @@ module "git_credential_coder" {
   agent_id = coder_agent.main.id
 }
 ```
+
+## `linear-mcp`
+
+[`modules/linear-mcp`](modules/linear-mcp) installs a Linear read-only MCP
+launcher backed by Coder external authentication. Unlinked accounts keep a
+healthy MCP connection with an empty tool list; tools become available after
+linking the account. The module installs the adapter and exposes its launcher
+command; the calling template registers it in its coding clients.
+
+```hcl
+module "linear_mcp" {
+  source           = "./modules/linear-mcp"
+  agent_id         = coder_agent.main.id
+  external_auth_id = "linear"
+}
+```

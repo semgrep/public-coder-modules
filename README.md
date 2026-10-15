@@ -2,6 +2,15 @@
 
 Reusable Terraform modules for [Coder](https://coder.com/) workspace templates.
 
+## `semgrep-guardian`
+
+[`modules/semgrep-guardian`](modules/semgrep-guardian) exports Guardian setup
+scripts for the Claude Code and Codex modules' `post_install_script` inputs.
+It installs missing plugins, re-enables disabled plugins, and verifies the
+result after each harness installs, without replacing unrelated settings.
+Developers still complete Semgrep OAuth and, for Codex hooks, trust review in
+a new session. See the module README for template wiring and policy limits.
+
 ## `pi-coding-agent`
 
 [`modules/pi-coding-agent`](modules/pi-coding-agent) installs the Pi CLI at

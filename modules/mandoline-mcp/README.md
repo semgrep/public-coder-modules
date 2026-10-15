@@ -52,7 +52,7 @@ The installer targets Linux x86_64 (`amd64`) only. For `latest`, it resolves
 the newest non-draft, non-prerelease with `gh release list`, then runs
 `gh release download` for `mandoline-linux-x86_64.tar.gz`. It extracts the
 archive in a temporary directory, installs `/usr/local/bin/mandoline`, and removes
-the temporary files.
+the temporary files. Once the binary is available, it runs `mandoline install-skill`.
 
 Pin an exact semantic version such as `0.15.0` to download the matching
 `v0.15.0` release tag and reinstall when that pin changes. Changing the

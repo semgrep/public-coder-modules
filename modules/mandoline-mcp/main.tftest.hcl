@@ -29,6 +29,10 @@ run "defaults" {
     condition     = strcontains(coder_script.mandoline_mcp.script, "install_dir=\"/usr/local/bin\"") && strcontains(coder_script.mandoline_mcp.script, "mktemp -d")
     error_message = "The installer must install into /usr/local/bin and stage downloads with mktemp -d."
   }
+  assert {
+    condition     = strcontains(coder_script.mandoline_mcp.script, "\"$install_dir/mandoline\" install-skill")
+    error_message = "After installing the binary, the installer must run mandoline install-skill."
+  }
 }
 
 run "pinned_version" {

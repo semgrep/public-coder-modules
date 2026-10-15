@@ -22,8 +22,8 @@ run "defaults" {
     error_message = "The Mandoline install directory must be prepended to PATH."
   }
   assert {
-    condition     = strcontains(coder_script.mandoline_mcp.script, "https://github.com/semgrep/mandoline/releases/latest/download/$asset") && strcontains(coder_script.mandoline_mcp.script, "asset='mandoline-linux-x86_64.tar.gz'")
-    error_message = "The default installer must download the latest Linux x86_64 release asset."
+    condition = strcontains(coder_script.mandoline_mcp.script, "gh release list --repo \"$repo\"") && strcontains(coder_script.mandoline_mcp.script, "gh release download \"$release\" --repo \"$repo\" --pattern \"$asset\"") && strcontains(coder_script.mandoline_mcp.script, "repo='semgrep/mandoline'")
+    error_message = "The installer must download private Mandoline releases with an authenticated gh CLI."
   }
   assert {
     condition     = strcontains(coder_script.mandoline_mcp.script, "install_dir=\"/opt/bin\"") && strcontains(coder_script.mandoline_mcp.script, "mktemp -d")
@@ -42,8 +42,8 @@ run "pinned_version" {
     error_message = "A pinned version must be recorded for idempotent upgrades."
   }
   assert {
-    condition     = strcontains(coder_script.mandoline_mcp.script, "https://github.com/semgrep/mandoline/releases/download/v$${selector}/$asset")
-    error_message = "A pinned version must download from the matching GitHub release tag."
+    condition     = strcontains(coder_script.mandoline_mcp.script, "release=\"v$${selector}\"")
+    error_message = "A pinned version must download the matching Mandoline release tag."
   }
   assert {
     condition     = output.mandoline_version == "0.15.0"

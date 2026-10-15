@@ -9,7 +9,7 @@ terraform {
 resource "coder_env" "mandoline_mcp_path" {
   agent_id       = var.agent_id
   name           = "PATH"
-  value          = "/opt:$PATH"
+  value          = "/opt/bin:$PATH"
   merge_strategy = "prepend"
 }
 

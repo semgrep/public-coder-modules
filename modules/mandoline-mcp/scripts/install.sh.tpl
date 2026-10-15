@@ -3,8 +3,7 @@
 set -eu
 umask 077
 
-state_dir="/tmp"
-install_dir="/opt"
+install_dir="/opt/bin"
 version_file="$install_dir/mandoline.version"
 selector='${mandoline_version}'
 asset='mandoline-linux-x86_64.tar.gz'
@@ -36,7 +35,7 @@ fi
 mkdir -p "$install_dir"
 
 if [ ! -x "$install_dir/mandoline" ] || [ "$(cat "$version_file" 2>/dev/null || true)" != "$selector" ]; then
-  staging="$(mktemp -d "$state_dir/mandoline.XXXXXX")"
+  staging="$(mktemp -d)"
   trap 'rm -rf "$staging"' EXIT HUP INT TERM
   echo "Downloading Mandoline ($selector)…"
   curl --fail --silent --show-error --location --proto '=https' \
@@ -46,7 +45,8 @@ if [ ! -x "$install_dir/mandoline" ] || [ "$(cat "$version_file" 2>/dev/null || 
     || fail 'Could not extract the Mandoline archive.'
   binary="$(find "$staging" -type f -name mandoline | head -n 1)"
   [ -n "$binary" ] || fail 'Mandoline archive did not contain a mandoline binary.'
-  install -m 0755 "$binary" "$install_dir/mandoline"
+  cp "$binary" "$install_dir/mandoline"
+  chmod 0755 "$install_dir/mandoline"
   printf '%s\n' "$selector" > "$version_file"
   chmod 600 "$version_file"
   rm -rf "$staging"

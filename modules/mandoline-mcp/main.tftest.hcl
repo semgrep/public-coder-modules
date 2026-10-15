@@ -14,11 +14,11 @@ run "defaults" {
     error_message = "Clients must receive mcp as the Mandoline MCP argument."
   }
   assert {
-    condition     = output.launcher_path == "/opt/mandoline"
-    error_message = "Clients must receive the /opt Mandoline binary path."
+    condition     = output.launcher_path == "/opt/bin/mandoline"
+    error_message = "Clients must receive the /opt/bin Mandoline binary path."
   }
   assert {
-    condition     = coder_env.mandoline_mcp_path.name == "PATH" && coder_env.mandoline_mcp_path.merge_strategy == "prepend" && coder_env.mandoline_mcp_path.value == "/opt:$PATH"
+    condition     = coder_env.mandoline_mcp_path.name == "PATH" && coder_env.mandoline_mcp_path.merge_strategy == "prepend" && coder_env.mandoline_mcp_path.value == "/opt/bin:$PATH"
     error_message = "The Mandoline install directory must be prepended to PATH."
   }
   assert {
@@ -26,8 +26,8 @@ run "defaults" {
     error_message = "The default installer must download the latest Linux x86_64 release asset."
   }
   assert {
-    condition     = strcontains(coder_script.mandoline_mcp.script, "install_dir=\"/opt\"") && strcontains(coder_script.mandoline_mcp.script, "state_dir=\"/tmp\"")
-    error_message = "The installer must install into /opt and stage downloads in /tmp."
+    condition     = strcontains(coder_script.mandoline_mcp.script, "install_dir=\"/opt/bin\"") && strcontains(coder_script.mandoline_mcp.script, "mktemp -d")
+    error_message = "The installer must install into /opt/bin and stage downloads with mktemp -d."
   }
 }
 

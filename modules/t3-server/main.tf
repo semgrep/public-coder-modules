@@ -52,6 +52,7 @@ resource "coder_script" "t3_server" {
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
     selected_channel="${var.channel}"
     exact_version="${var.t3_version == null ? "" : var.t3_version}"
+    provider_instances="${length(var.provider_instances) == 0 ? "" : base64encode(jsonencode(var.provider_instances))}"
 
     mkdir -p "$t3_home" "$log_dir"
     chmod 700 "$t3_home" "$log_dir"
@@ -199,6 +200,70 @@ resource "coder_script" "t3_server" {
         fi
       done < "$repositories_file"
       rm -f "$repositories_file"
+    fi
+
+    # Register the requested provider instances in T3's settings. T3 watches
+    # the file, so a running server picks the change up; write it in place so
+    # the watched inode stays the same. A requested id may be new or one of
+    # T3's existing instances (such as the default claudeAgent): the module
+    # records which, and the binary path it replaced, so an id later dropped
+    # from the map is deleted if the module created it and otherwise gets its
+    # original binary path back. Everything else is left as is. This is
+    # optional, so a failure (no jq, unreadable settings) only warns: each
+    # step is checked explicitly because errexit does not apply inside `||`.
+    managed_instances_file="$t3_home/managed-provider-instances.json"
+    settings_file="$t3_home/userdata/settings.json"
+    register_provider_instances() {
+      command -v jq >/dev/null 2>&1 || { echo "provider_instances requires jq" >&2; return 1; }
+      mkdir -p "$t3_home/userdata" || return 1
+      if [ ! -s "$settings_file" ]; then
+        printf '{}\n' > "$settings_file" || return 1
+      fi
+      desired_instances="{}"
+      if [ -n "$provider_instances" ]; then
+        desired_instances="$(printf '%s' "$provider_instances" | base64 -d)" || return 1
+      fi
+      previous_instances="$(cat "$managed_instances_file" 2>/dev/null || printf '{}')"
+      update="$(jq -c --argjson desired "$desired_instances" --argjson previous "$previous_instances" '
+        (.providerInstances // {}) as $existing
+        | ($desired | with_entries(
+            .key as $id
+            | .value = ($previous[$id] // (
+                if $existing | has($id)
+                then {created: false, previous_binary_path: $existing[$id].config.binaryPath}
+                else {created: true}
+                end)))) as $managed
+        | {
+            managed: $managed,
+            settings: (.providerInstances = (
+              reduce ($previous | to_entries[] | select(.key as $id | $desired | has($id) | not)) as $dropped ($existing;
+                if has($dropped.key) | not then .
+                elif $dropped.value.created then del(.[$dropped.key])
+                elif $dropped.value.previous_binary_path == null then del(.[$dropped.key].config.binaryPath)
+                else .[$dropped.key].config.binaryPath = $dropped.value.previous_binary_path
+                end)
+              | reduce ($desired | to_entries[]) as $instance (.;
+                  .[$instance.key] = (
+                    (.[$instance.key] // {enabled: true})
+                    + {driver: $instance.value.driver}
+                    + (if $instance.value.display_name == null then {} else {displayName: $instance.value.display_name} end)
+                    | .config = ((.config // {}) + {binaryPath: $instance.value.binary_path})
+                  ))
+            ))
+          }' "$settings_file")" || return 1
+      updated_settings="$(printf '%s' "$update" | jq '.settings')" || return 1
+      managed_instances="$(printf '%s' "$update" | jq -c '.managed')" || return 1
+      [ -n "$updated_settings" ] && [ -n "$managed_instances" ] || return 1
+      printf '%s\n' "$updated_settings" > "$settings_file" || return 1
+      if [ "$managed_instances" = "{}" ]; then
+        rm -f "$managed_instances_file"
+      else
+        printf '%s\n' "$managed_instances" > "$managed_instances_file" || return 1
+        chmod 600 "$managed_instances_file"
+      fi
+    }
+    if [ -n "$provider_instances" ] || [ -f "$managed_instances_file" ]; then
+      register_provider_instances || echo "Could not update T3 provider instances in $settings_file; starting T3 without the change" >&2
     fi
 
     existing_t3_pid=""

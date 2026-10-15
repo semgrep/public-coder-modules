@@ -64,6 +64,7 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
+| `provider_instances` | T3 provider instances to register or retarget, keyed by instance id: `driver`, absolute `binary_path` and optional `display_name`. Needs `jq`; registration is best effort. | `map(object({ driver = string, display_name = optional(string), binary_path = string }))` | `{}` | no |
 
 ## Outputs
 
@@ -107,6 +108,38 @@ To pair a native client, run `t3 pair` interactively in the workspace. When
 the pairing URL to `https://<public_domain>`; configure that domain to proxy to
 this app before sharing a link. Do not put pairing URLs in provisioning scripts
 or logs.
+
+## Provider instances
+
+`provider_instances` registers T3 provider instances, or retargets existing
+ones, in `$HOME/.t3/userdata/settings.json` on every start. Each entry names a
+driver and a binary path, and optionally a display name. A common use is
+pointing T3's default instances at wrappers that run the CLIs somewhere else:
+
+```hcl
+module "t3_server" {
+  source = "./modules/t3-server"
+
+  agent_id = coder_agent.main.id
+  provider_instances = {
+    claudeAgent = {
+      driver      = "claudeAgent"
+      binary_path = "/usr/local/bin/claude-devcontainer"
+    }
+  }
+}
+```
+
+The module sets each instance's `driver`, `config.binaryPath` and, when given,
+`displayName`, and leaves its other settings, including `enabled`, as the user
+left them. It records in `$HOME/.t3/managed-provider-instances.json` whether it
+created each instance or retargeted an existing one, and the binary path it
+replaced. When an id leaves the map, an instance the module created is removed
+and an existing one gets its original binary path back; the record is deleted
+once the module manages nothing. Other instances are never touched. T3 watches
+its settings file, so a running server picks the change up without a restart.
+Registration is best effort: if `jq` is missing or the settings file cannot be
+parsed, startup logs a warning and T3 starts unchanged.
 
 ## OpenRC supervision and rotating logs
 

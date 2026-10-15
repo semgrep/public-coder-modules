@@ -14,11 +14,11 @@ run "defaults" {
     error_message = "Clients must receive mcp as the Mandoline MCP argument."
   }
   assert {
-    condition     = output.launcher_path == "/opt/bin/mandoline"
-    error_message = "Clients must receive the /opt/bin Mandoline binary path."
+    condition     = output.launcher_path == "/usr/local/bin/mandoline"
+    error_message = "Clients must receive the /usr/local/bin Mandoline binary path."
   }
   assert {
-    condition     = coder_env.mandoline_mcp_path.name == "PATH" && coder_env.mandoline_mcp_path.merge_strategy == "prepend" && coder_env.mandoline_mcp_path.value == "/opt/bin:$PATH"
+    condition     = coder_env.mandoline_mcp_path.name == "PATH" && coder_env.mandoline_mcp_path.merge_strategy == "prepend" && coder_env.mandoline_mcp_path.value == "/usr/local/bin:$PATH"
     error_message = "The Mandoline install directory must be prepended to PATH."
   }
   assert {
@@ -26,8 +26,8 @@ run "defaults" {
     error_message = "The installer must download private Mandoline releases with an authenticated gh CLI."
   }
   assert {
-    condition     = strcontains(coder_script.mandoline_mcp.script, "install_dir=\"/opt/bin\"") && strcontains(coder_script.mandoline_mcp.script, "mktemp -d")
-    error_message = "The installer must install into /opt/bin and stage downloads with mktemp -d."
+    condition     = strcontains(coder_script.mandoline_mcp.script, "install_dir=\"/usr/local/bin\"") && strcontains(coder_script.mandoline_mcp.script, "mktemp -d")
+    error_message = "The installer must install into /usr/local/bin and stage downloads with mktemp -d."
   }
 }
 

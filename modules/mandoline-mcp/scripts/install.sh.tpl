@@ -3,7 +3,7 @@
 set -eu
 umask 077
 
-install_dir="/opt/bin"
+install_dir="/usr/local/bin"
 version_file="$install_dir/mandoline.version"
 selector='${mandoline_version}'
 asset='mandoline-linux-x86_64.tar.gz'

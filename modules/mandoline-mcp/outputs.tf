@@ -10,7 +10,7 @@ output "launcher_args" {
 
 output "launcher_path" {
   description = "Installed Mandoline binary path."
-  value       = "/opt/bin/mandoline"
+  value       = "/usr/local/bin/mandoline"
 }
 
 output "mandoline_version" {

@@ -60,4 +60,9 @@ if [ ! -x "$install_dir/mandoline" ] || [ "$(cat "$version_file" 2>/dev/null || 
 fi
 
 [ -x "$install_dir/mandoline" ] || fail 'Mandoline installation finished without an executable binary.'
+
+echo "Installing Mandoline skill…"
+"$install_dir/mandoline" install-skill \
+  || fail 'Could not install the Mandoline skill.'
+
 echo "Mandoline MCP installed ($release); use \`mandoline mcp\`."

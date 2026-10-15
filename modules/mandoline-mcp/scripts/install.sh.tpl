@@ -3,7 +3,7 @@
 set -eu
 umask 077
 
-state_dir="$HOME/.local/share/coder-mandoline-mcp"
+state_dir="$HOME/.local/share/mandoline"
 install_dir="$HOME/.local/bin"
 version_file="$state_dir/version"
 selector='${mandoline_version}'
@@ -55,6 +55,4 @@ if [ ! -x "$install_dir/mandoline" ] || [ "$(cat "$version_file" 2>/dev/null || 
 fi
 
 [ -x "$install_dir/mandoline" ] || fail 'Mandoline installation finished without an executable binary.'
-# Remove a prior wrapper if an older module revision left one behind.
-rm -f "$install_dir/coder-mandoline-mcp"
 echo "Mandoline MCP installed ($selector); use \`mandoline mcp\`."

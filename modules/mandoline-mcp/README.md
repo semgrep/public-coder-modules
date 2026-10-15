@@ -51,7 +51,7 @@ By default `mandoline_version = "latest"` downloads from
 `https://github.com/semgrep/mandoline/releases/latest/download/mandoline-linux-x86_64.tar.gz`.
 Pin an exact semantic version to install from the matching tagged release and
 to reinstall when that pin changes. Changing the selector, or removing
-`$HOME/.local/share/coder-mandoline-mcp`, refreshes the binary on the next
+`$HOME/.local/share/mandoline`, refreshes the binary on the next
 workspace start.
 
 Mandoline analyzes the client's working directory; no Coder external

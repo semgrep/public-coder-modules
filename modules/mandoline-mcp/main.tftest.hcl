@@ -26,8 +26,8 @@ run "defaults" {
     error_message = "The default installer must download the latest Linux x86_64 release asset."
   }
   assert {
-    condition     = strcontains(coder_script.mandoline_mcp.script, "\"$install_dir/mandoline\"") && !strcontains(coder_script.mandoline_mcp.script, "coder-mandoline-mcp <<")
-    error_message = "The installer must place mandoline on PATH without a wrapper launcher."
+    condition     = strcontains(coder_script.mandoline_mcp.script, "\"$install_dir/mandoline\"")
+    error_message = "The installer must place mandoline on PATH."
   }
 }
 

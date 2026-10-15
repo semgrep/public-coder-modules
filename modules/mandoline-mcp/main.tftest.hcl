@@ -22,7 +22,7 @@ run "defaults" {
     error_message = "The Mandoline install directory must be prepended to PATH."
   }
   assert {
-    condition = strcontains(coder_script.mandoline_mcp.script, "gh release list --repo \"$repo\"") && strcontains(coder_script.mandoline_mcp.script, "gh release download \"$release\" --repo \"$repo\" --pattern \"$asset\"") && strcontains(coder_script.mandoline_mcp.script, "repo='semgrep/mandoline'")
+    condition     = strcontains(coder_script.mandoline_mcp.script, "gh release list --repo \"$repo\"") && strcontains(coder_script.mandoline_mcp.script, "gh release download \"$release\" --repo \"$repo\" --pattern \"$asset\"") && strcontains(coder_script.mandoline_mcp.script, "repo='semgrep/mandoline'")
     error_message = "The installer must download private Mandoline releases with an authenticated gh CLI."
   }
   assert {

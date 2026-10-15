@@ -130,3 +130,17 @@ module "slack_mcp" {
 Register the exported launcher command in your clients. Choose `read-write`
 to expose all tools permitted by the Slack grant. See the module README for
 Codex environment forwarding and runtime requirements.
+
+## `mandoline-mcp`
+
+[`modules/mandoline-mcp`](modules/mandoline-mcp) installs Mandoline on the
+agent PATH so clients can run `mandoline mcp` as a local stdio MCP server.
+The startup script downloads the Linux x86_64 release from GitHub. The calling
+template registers `mandoline` with args `["mcp"]` in its coding clients.
+
+```hcl
+module "mandoline_mcp" {
+  source   = "./modules/mandoline-mcp"
+  agent_id = coder_agent.main.id
+}
+```

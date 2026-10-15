@@ -9,8 +9,8 @@ output "launcher_args" {
 }
 
 output "launcher_path" {
-  description = "User-scoped Mandoline binary location. Expand HOME before using this as an absolute client command."
-  value       = "$HOME/.local/bin/mandoline"
+  description = "Installed Mandoline binary path."
+  value       = "/opt/mandoline"
 }
 
 output "mandoline_version" {

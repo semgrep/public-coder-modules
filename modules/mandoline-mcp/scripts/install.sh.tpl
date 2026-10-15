@@ -3,9 +3,9 @@
 set -eu
 umask 077
 
-state_dir="$HOME/.local/share/mandoline"
-install_dir="$HOME/.local/bin"
-version_file="$state_dir/version"
+state_dir="/tmp"
+install_dir="/opt"
+version_file="$install_dir/mandoline.version"
 selector='${mandoline_version}'
 asset='mandoline-linux-x86_64.tar.gz'
 
@@ -33,11 +33,10 @@ else
   download_url="https://github.com/semgrep/mandoline/releases/download/v$${selector}/$asset"
 fi
 
-mkdir -p "$state_dir" "$install_dir"
-chmod 700 "$state_dir"
+mkdir -p "$install_dir"
 
 if [ ! -x "$install_dir/mandoline" ] || [ "$(cat "$version_file" 2>/dev/null || true)" != "$selector" ]; then
-  staging="$(mktemp -d "$state_dir/download.XXXXXX")"
+  staging="$(mktemp -d "$state_dir/mandoline.XXXXXX")"
   trap 'rm -rf "$staging"' EXIT HUP INT TERM
   echo "Downloading Mandoline ($selector)…"
   curl --fail --silent --show-error --location --proto '=https' \

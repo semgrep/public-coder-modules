@@ -15,8 +15,8 @@ module "mandoline_mcp" {
 }
 ```
 
-The module installs `mandoline` in `$HOME/.local/bin` and adds that location to
-the agent PATH. Register `module.mandoline_mcp.launcher_command` with
+The module installs `mandoline` in `/opt` and prepends that directory to the
+agent PATH. Register `module.mandoline_mcp.launcher_command` with
 `module.mandoline_mcp.launcher_args` in your clients' MCP configuration. For
 example, Claude Code accepts:
 
@@ -42,17 +42,18 @@ access to the installed Mandoline binary.
 
 ## Installation
 
-The agent image must provide `curl`, `tar`, and a POSIX shell. Initial
-installation needs outbound HTTPS access to GitHub releases. The installer
-targets Linux x86_64 (`amd64`) only and extracts the published
-`mandoline-linux-x86_64.tar.gz` asset.
+The agent image must provide `curl`, `tar`, and a POSIX shell, and the agent
+user must be able to write to `/opt`. Initial installation needs outbound HTTPS
+access to GitHub releases. The installer targets Linux x86_64 (`amd64`) only
+and extracts the published `mandoline-linux-x86_64.tar.gz` asset into a
+temporary directory under `/tmp` before installing the binary.
 
 By default `mandoline_version = "latest"` downloads from
 `https://github.com/semgrep/mandoline/releases/latest/download/mandoline-linux-x86_64.tar.gz`.
 Pin an exact semantic version to install from the matching tagged release and
 to reinstall when that pin changes. Changing the selector, or removing
-`$HOME/.local/share/mandoline`, refreshes the binary on the next
-workspace start.
+`/opt/mandoline` (and `/opt/mandoline.version`), refreshes the binary on the
+next workspace start.
 
 Mandoline analyzes the client's working directory; no Coder external
 authentication is required.
@@ -63,8 +64,8 @@ authentication is required.
 | `mandoline_version` | `latest` | `latest` or an exact release such as `0.15.0` |
 
 Outputs: `launcher_command` is `mandoline`; `launcher_args` is `["mcp"]`;
-`launcher_path` is the `$HOME`-relative binary path (expand HOME before using
-it as an absolute command); `mandoline_version` echoes the configured selector.
+`launcher_path` is `/opt/mandoline`; `mandoline_version` echoes the configured
+selector.
 
 ## Validation
 

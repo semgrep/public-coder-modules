@@ -56,7 +56,6 @@ export function createAdapter({ providerId = 'linear', accessMode = 'read-only',
   let connecting;
   let initialized = false;
   let closed = false;
-  let poll;
   let shutdownPromise;
   let reportedAuthUrl;
   const notify = () => {
@@ -86,9 +85,7 @@ export function createAdapter({ providerId = 'linear', accessMode = 'read-only',
   };
   const ensureClient = async () => {
     if (closed) throw new Error('Adapter closed');
-    // Check even when a session exists: account unlinking must hide tools.
-    await getToken();
-    if (closed) throw new Error('Adapter closed');
+    // Authentication is checked by authenticatedFetch for each upstream request.
     if (client) return client;
     if (!connecting) connecting = (async () => {
       const candidate = new Client({ name: 'coder-linear-mcp', version: '1.0.0' });
@@ -142,26 +139,18 @@ export function createAdapter({ providerId = 'linear', accessMode = 'read-only',
       };
     }
   });
-  // Clients can discover newly linked accounts without restarting. Also
-  // detect account removal while idle; revoked tokens are caught by fetch.
-  const checkAuth = async () => {
-    try { await ensureClient(); } catch (error) { reportAuth(error); await disconnect(); }
-  };
+  // Stay idle until the client lists or calls tools. Coder may validate tokens
+  // against the provider, so even an idle authentication poll can consume quota.
   server.oninitialized = () => {
     initialized = true;
-    poll = setInterval(() => { checkAuth(); }, 30000);
-    poll.unref();
-    // Defer until the initial stdio handshake has completed.
-    setImmediate(() => { checkAuth(); });
   };
   const close = () => shutdownPromise ??= (async () => {
     closed = true;
-    clearInterval(poll);
     await disconnect();
     await connecting?.catch(() => {});
     await server.close();
   })();
-  return { server, checkAuth, close };
+  return { server, close };
 }
 
 async function main() {

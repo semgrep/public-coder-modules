@@ -69,12 +69,17 @@ the Coder linking page is retained; query parameters and raw subprocess errors
 are never printed. If the credential context is unavailable and Coder cannot
 supply a URL, the reply gives the CLI command to retrieve it.
 
-The adapter checks authentication every 30 seconds. After linking Linear in
-Coder, it sends `notifications/tools/list_changed` when tools become available.
-Clients that honor that notification update automatically; clients that cache
-tool lists may require a reconnect. Unlinking hides tools again. Rejected
-upstream credentials also hide tools while keeping the local MCP healthy.
-Network outages return a sanitized MCP error and can recover on later requests.
+Authentication is lazy: initialization and idle time do not retrieve credentials
+or contact the provider. Listing or calling tools retrieves a current Coder token
+for each upstream HTTP request, without a separate preflight check. There is no
+background authentication timer or credential cache.
+
+After linking in Coder, refresh the client's tool list or reconnect if it caches
+an empty list. Account changes are discovered on the next request, rather than
+while idle; unlinking or HTTP 401/403 hides tools and keeps the local MCP healthy.
+Tool-list-change notifications are sent when a request connects or disconnects
+the upstream client. Upstream outages return sanitized errors and recover on
+later requests.
 
 ## Installation and credentials
 

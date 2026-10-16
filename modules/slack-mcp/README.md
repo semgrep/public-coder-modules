@@ -79,10 +79,17 @@ read-tool error replies and printed once to stderr. Only the linking-page URL
 is retained; query parameters and raw subprocess diagnostics are not relayed.
 If no URL is available, the reply gives the CLI command to obtain one.
 
-The adapter polls authentication every 30 seconds and notifies clients when
-linking/unlinking changes tool availability. Clients that cache tools may need
-a reconnect. Rejected credentials hide tools while keeping MCP healthy;
-upstream outages produce sanitized MCP errors and can recover on later calls.
+Authentication is lazy: initialization and idle time do not retrieve credentials
+or contact the provider. Listing or calling tools retrieves a current Coder token
+for each upstream HTTP request, without a separate preflight check. There is no
+background authentication timer or credential cache.
+
+After linking in Coder, refresh the client's tool list or reconnect if it caches
+an empty list. Account changes are discovered on the next request, rather than
+while idle; unlinking or HTTP 401/403 hides tools and keeps the local MCP healthy.
+Tool-list-change notifications are sent when a request connects or disconnects
+the upstream client. Upstream outages return sanitized errors and recover on
+later requests.
 
 Each upstream request obtains a current token using
 `coder external-auth access-token <external_auth_id>`. Coder manages refresh.

@@ -95,10 +95,17 @@ Coder supplies a linking URL, the adapter includes it in the reply and prints
 it once on stderr, stripping query parameters and raw subprocess diagnostics.
 Otherwise the reply gives the CLI command to obtain the link.
 
-The adapter checks authentication every 30 seconds and sends tool-list-change
-notifications after linking/unlinking. Clients that cache tools may need to
-reconnect. HTTP 401/403 hides tools without launching a separate browser OAuth
-flow; upstream outages produce sanitized errors and recover on later calls.
+Authentication is lazy: initialization and idle time do not retrieve credentials
+or contact the provider. Listing or calling tools retrieves a current Coder token
+for each upstream HTTP request, without a separate preflight check. There is no
+background authentication timer or credential cache.
+
+After linking in Coder, refresh the client's tool list or reconnect if it caches
+an empty list. Account changes are discovered on the next request, rather than
+while idle; unlinking or HTTP 401/403 hides tools and keeps the local MCP healthy.
+Tool-list-change notifications are sent when a request connects or disconnects
+the upstream client. Upstream outages return sanitized errors and recover on
+later requests.
 
 Every upstream request fetches a current token with
 `coder external-auth access-token <external_auth_id>`. Tokens remain in memory,

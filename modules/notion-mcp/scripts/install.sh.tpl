@@ -8,8 +8,13 @@ notion_dir="$HOME/.local/share/coder-notion-mcp"
 export PNPM_HOME="$notion_dir/pnpm"
 mkdir -p "$PNPM_HOME/bin" "$HOME/.local/bin" "$notion_dir/app"
 export PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
-if [ ! -x "$PNPM_HOME/bin/node" ]; then
+if [ ! -x "$PNPM_HOME/bin/node" ] && [ ! -x "$PNPM_HOME/node" ]; then
   "$PNPM" env use --global 24
+fi
+# pnpm 10 installs into PNPM_HOME; pnpm 11 uses PNPM_HOME/bin.
+if [ ! -x "$PNPM_HOME/bin/node" ] && [ ! -x "$PNPM_HOME/node" ]; then
+  echo 'pnpm did not install a usable Node runtime for Notion MCP.' >&2
+  exit 1
 fi
 cat > "$notion_dir/app/package.json" <<'PACKAGE'
 ${package_json}
@@ -27,7 +32,9 @@ ${adapter_js}
 ADAPTER
 cat > "$HOME/.local/bin/coder-notion-mcp" <<'LAUNCHER'
 #!/bin/sh
-exec "$HOME/.local/share/coder-notion-mcp/pnpm/bin/node" \
+notion_node="$HOME/.local/share/coder-notion-mcp/pnpm/bin/node"
+[ -x "$notion_node" ] || notion_node="$HOME/.local/share/coder-notion-mcp/pnpm/node"
+exec "$notion_node" \
   "$HOME/.local/share/coder-notion-mcp/app/notion-mcp.mjs" '${external_auth_id}' '${access_mode}'
 LAUNCHER
 chmod 0755 "$HOME/.local/bin/coder-notion-mcp"

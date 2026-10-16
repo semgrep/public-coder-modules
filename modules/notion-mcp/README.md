@@ -109,7 +109,8 @@ URL; redirects are rejected.
 ## Installation and interface
 
 Standalone pnpm is required on PATH or at `/usr/local/share/pnpm/bin/pnpm`,
-with Node environment management. The blocking startup script provisions
+with Node environment management. Both pnpm 10 (`PNPM_HOME/node`) and pnpm 11
+(`PNPM_HOME/bin/node`) runtime layouts are supported. The blocking startup script provisions
 user-local Node 24 and the official MCP SDK from a frozen lockfile, with
 lifecycle scripts disabled. First installation needs Node/npm network access;
 subsequent starts reuse dependencies when the lockfile is unchanged. Account
@@ -124,12 +125,14 @@ Outputs: `launcher_command`, `$HOME`-relative `launcher_path`, `access_mode`.
 ```sh
 cd modules/notion-mcp
 pnpm install --frozen-lockfile --ignore-scripts
-node --test tests/adapter.test.mjs
+node --test tests/*.test.mjs
 terraform init -backend=false
 terraform test
 ```
 
-Tests cover unlinked/expired authentication, URL guidance, current-token
+Installer tests cover both runtime layouts on fresh installs and restarts,
+including failure when pnpm produces no usable Node. Adapter tests cover
+unlinked/expired authentication, URL guidance, current-token
 retrieval, reconnects, discovery pagination, explicit read-only enforcement,
 user-lookup rejection, and read-write calls to a simulated upstream. Live
 validation should list tools and read a page; never exercise real write or

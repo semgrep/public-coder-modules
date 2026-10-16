@@ -23,7 +23,7 @@ jobs:
           node-version: "24"
       - run: npm install --global pnpm@11.19.0 --ignore-scripts --no-audit --no-fund
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: node --test tests/adapter.test.mjs
+      - run: node --test tests/*.test.mjs
 
   terraform:
     runs-on: ubuntu-latest

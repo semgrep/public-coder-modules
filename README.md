@@ -144,3 +144,12 @@ module "mandoline_mcp" {
   agent_id = coder_agent.main.id
 }
 ```
+
+## Notion MCP
+
+[`modules/notion-mcp`](modules/notion-mcp) installs an optional-auth stdio adapter
+for Notion's hosted MCP server using the workspace owner's Coder OAuth token.
+Read-only is the default and enforces a reviewed content-read tool allowlist
+on discovery and direct calls. Read-write is an explicit opt-in. The module
+includes frozen dependencies, optional-auth guidance, and tests. See its README
+for the distinction between adapter policy and the broader OAuth grant.

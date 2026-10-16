@@ -49,6 +49,31 @@ async function connect(t, options) {
   return { adapter, client };
 }
 
+test('initialization and idle time do not acquire credentials or contact the provider', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let credentials = 0;
+  const remote = fakeSlack();
+  const { client } = await connect(t, {
+    getToken: async () => { credentials++; return 'fake-token'; },
+    fetchImpl: remote.fetchImpl,
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(credentials, 0);
+  assert.equal(remote.requests.length, 0);
+  t.mock.timers.tick(120000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(credentials, 0);
+  assert.equal(remote.requests.length, 0);
+
+  await client.listTools();
+  const used = credentials;
+  assert.ok(used > 0);
+  t.mock.timers.tick(120000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(credentials, used);
+  assert.equal(remote.requests.length, used);
+});
+
 test('unlinked accounts initialize successfully and expose zero tools without network calls', async t => {
   const { client } = await connect(t, {
     getToken: async () => { throw new AuthUnavailable(); },
@@ -64,7 +89,7 @@ test('unlinked accounts initialize successfully and expose zero tools without ne
 test('linking and unlinking update tools on the same MCP connection', async t => {
   let linked = false;
   const remote = fakeSlack();
-  const { adapter, client } = await connect(t, {
+  const { client } = await connect(t, {
     getToken: async () => { if (!linked) throw new AuthUnavailable(); return 'fake-token'; },
     fetchImpl: remote.fetchImpl,
   });
@@ -72,11 +97,10 @@ test('linking and unlinking update tools on the same MCP connection', async t =>
   let changes = 0;
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => { changes++; });
   linked = true;
-  await adapter.checkAuth();
   assert.equal((await client.listTools()).tools[0].name, 'slack_read_channel');
   assert.equal((await client.callTool({ name: 'slack_read_channel', arguments: {} })).content[0].text, 'Example message');
   linked = false;
-  await adapter.checkAuth();
+  assert.equal((await client.callTool({ name: 'slack_search_public', arguments: {} })).isError, true);
   assert.deepEqual((await client.listTools()).tools, []);
   await client.ping();
   assert.ok(changes >= 2);
@@ -93,6 +117,7 @@ test('each upstream request retrieves a fresh Coder token, including long sessio
   const tokens = remote.requests.map(request => request.token);
   assert.ok(tokens.length >= 3);
   assert.equal(new Set(tokens).size, tokens.length);
+  assert.equal(credentials, remote.requests.length, 'no redundant token preflight checks');
 });
 
 test('rejected OAuth credentials leave a healthy empty MCP without browser authentication', async t => {
@@ -161,7 +186,7 @@ test('invalid access modes cannot select an arbitrary endpoint', () => {
 test('unlinked tool replies include Coder linking URL and diagnostics are emitted once', async t => {
   const url = 'https://coder.example.test/external-auth/slack';
   const messages = [];
-  const { adapter, client } = await connect(t, {
+  const { client } = await connect(t, {
     getToken: async () => { throw new AuthUnavailable(url); },
     log: message => messages.push(message),
     fetchImpl: async () => assert.fail('must not contact Slack'),
@@ -170,7 +195,7 @@ test('unlinked tool replies include Coder linking URL and diagnostics are emitte
   const result = await client.callTool({ name: 'slack_read_channel', arguments: {} });
   assert.equal(result.isError, true);
   assert.ok(result.content[0].text.includes(url));
-  await adapter.checkAuth();
+  await client.listTools();
   await client.ping();
   assert.deepEqual(messages, [`Slack MCP: link your account at ${url}`]);
 });

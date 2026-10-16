@@ -74,7 +74,8 @@ class LifecycleTest(unittest.TestCase):
         self.work = self.root / "project with spaces"
         self.work.mkdir()
         self.runtime = self.root / "openrc-runtime"
-        self.env = dict(os.environ, T3_TEST_HOME=str(self.home), T3_TEST_TOKEN="test-secret-value",
+        self.env = dict(os.environ, T3_TEST_HOME=str(self.home), T3CODE_HOME=str(self.home / ".t3"),
+                        T3_TEST_TOKEN="test-secret-value",
                         XDG_CONFIG_HOME=str(self.root / "agent-config"),
                         XDG_RUNTIME_DIR=str(self.root / "agent-runtime"))
         for channel in ["stable", "nightly"]:
@@ -92,6 +93,7 @@ class LifecycleTest(unittest.TestCase):
         (self.root / "main.tf").write_text("locals {\nscript = <<-EOT\n" + script + "\nEOT\n}\n")
         shutil.copy(MODULE / "variables.tf", self.root)
         shutil.copy(MODULE / "openrc.sh", self.root)
+        shutil.copy(MODULE / "initial-settings.sh", self.root)
 
     def render(self, backend, channel="stable", rotation=None):
         args = [TERRAFORM, "console", "-var=agent_id=test", f"-var=server_backend={backend}",

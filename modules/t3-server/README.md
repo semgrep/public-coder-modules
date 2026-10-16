@@ -35,7 +35,8 @@ module "t3_server" {
 ## Prerequisites
 
 Terraform 1.3 or later is required (1.7 or later to run the mocked module tests).
-The agent image must provide `curl`, `git`, `ps`, `readlink`, and a POSIX shell.
+The agent image must provide `curl`, `git`, `ps`, `readlink`, `base64`, `mktemp`,
+`flock`, `ln` (with `-T` support), and a POSIX shell.
 The first workspace start needs outbound access to `https://t3.codes/install.sh`
 unless T3 is already installed. Channel switches also need access to T3 release
 downloads. Repository bootstrap requires that the agent can
@@ -63,6 +64,7 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `channel` | Release channel selected at each start: `stable` or `nightly`. | `string` | `stable` | no |
 | `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
+| `initial_settings` | Settings object seeded once for fresh T3 data; `null` disables seeding. | `any` (object or null) | `{}` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
 
 ## Outputs
@@ -107,6 +109,47 @@ To pair a native client, run `t3 pair` interactively in the workspace. When
 the pairing URL to `https://<public_domain>`; configure that domain to proxy to
 this app before sharing a link. Do not put pairing URLs in provisioning scripts
 or logs.
+
+## Initial settings
+
+`initial_settings` defaults to `{}`, leaving T3's own defaults in effect.
+Pass settings from the calling template to choose initial values. For example:
+
+```hcl
+module "t3_server" {
+  source   = "./modules/t3-server"
+  agent_id = coder_agent.main.id
+
+  initial_settings = {
+    defaultModelSelection = {
+      instanceId = "codex"
+      model      = "gpt-6.1-sol"
+    }
+    defaultRuntimeMode      = "auto"
+    defaultThreadEnvMode    = "worktree"
+    addProjectBaseDirectory = "~/git"
+  }
+}
+```
+
+Omitted fields use T3's own defaults. Set `initial_settings = null` to disable
+seeding. Use the settings JSON shape supported by the installed T3 version; the
+module checks that the input is an object, while T3 validates individual settings.
+
+Before installation, project registration, or server startup, the module writes
+the seed to `$HOME/.t3/userdata/settings.json` only if `userdata` does not already
+exist. If `T3CODE_HOME` is set, initialization uses that data directory instead.
+Even an empty or linked existing `userdata` path is preserved, including
+installations with a database but no settings file. A preinstalled executable
+with no user data still receives the seed.
+
+The module records its decision in `initial-settings-initialized` under the T3
+data directory, including when seeding was disabled or skipped. Repeated starts,
+changed module inputs, and user resets or deletions never reapply the seed.
+Existing installations must be configured through T3's settings UI. Concurrent
+initialization is serialized, and the seed is published as a complete private
+file without overwriting an existing file. Project overrides remain under T3's
+normal inheritance rules. Device preferences such as fonts are outside this seed.
 
 ## OpenRC supervision and rotating logs
 

@@ -52,11 +52,16 @@ resource "coder_script" "t3_server" {
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
     selected_channel="${var.channel}"
     exact_version="${var.t3_version == null ? "" : var.t3_version}"
+    initial_settings="${var.initial_settings == null ? "" : base64encode(jsonencode(var.initial_settings))}"
 
     mkdir -p "$t3_home" "$log_dir"
     chmod 700 "$t3_home" "$log_dir"
     touch "$log_file"
     chmod 600 "$log_file"
+
+    # Seed before any installer or CLI command can initialize T3's user data.
+    ${file("${path.module}/initial-settings.sh")}
+    initialize_t3_settings
 
     ${file("${path.module}/openrc.sh")}
 

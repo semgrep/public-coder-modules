@@ -143,3 +143,28 @@ run "custom_configuration" {
     error_message = "The pairing shim must rewrite loopback pairing URLs to the public domain."
   }
 }
+
+run "disabled_initial_settings" {
+  command = plan
+
+  variables {
+    agent_id         = "test-agent-id"
+    initial_settings = null
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "initial_settings=\"\"")
+    error_message = "A null seed must disable settings initialization."
+  }
+}
+
+run "invalid_initial_settings" {
+  command = plan
+
+  variables {
+    agent_id         = "test-agent-id"
+    initial_settings = ["not-an-object"]
+  }
+
+  expect_failures = [var.initial_settings]
+}

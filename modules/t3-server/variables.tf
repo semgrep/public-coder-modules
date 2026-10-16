@@ -101,6 +101,17 @@ variable "public_domain" {
   }
 }
 
+variable "initial_settings" {
+  description = "Initial T3 settings for a fresh data directory only. Omitted settings use T3's defaults; null disables seeding. Existing installations and later user changes are preserved."
+  type        = any
+  default     = {}
+
+  validation {
+    condition     = var.initial_settings == null ? true : can(keys(var.initial_settings))
+    error_message = "initial_settings must be a settings object or null."
+  }
+}
+
 variable "initial_repositories" {
   description = "Repositories to clone into $HOME/git and add as T3 projects before the server starts."
   type = list(object({

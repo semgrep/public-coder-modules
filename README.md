@@ -93,43 +93,15 @@ module "git_credential_coder" {
 }
 ```
 
-## `linear-mcp`
+## MCP adapter
 
-[`modules/linear-mcp`](modules/linear-mcp) installs a Linear MCP
-launcher backed by Coder external authentication. Unlinked accounts keep a
-healthy MCP connection with an empty tool list; tools become available after
-linking the account. The module installs the adapter and exposes its launcher
-command; the calling template registers it in its coding clients.
-`access_mode` defaults to `read-only`; choose `read-write` to expose write tools
-with a write-capable OAuth grant.
-
-```hcl
-module "linear_mcp" {
-  source           = "./modules/linear-mcp"
-  agent_id         = coder_agent.main.id
-  external_auth_id = "linear"
-}
-```
-
-## `slack-mcp`
-
-[`modules/slack-mcp`](modules/slack-mcp) installs a Slack MCP launcher backed
-by Coder external authentication. Read-only is the default: an explicit tool
-allowlist filters discovery and rejects write calls before forwarding them.
-Unlinked accounts keep a healthy empty MCP and receive Coder linking guidance.
-
-```hcl
-module "slack_mcp" {
-  source           = "./modules/slack-mcp"
-  agent_id         = coder_agent.main.id
-  external_auth_id = "slack"
-  access_mode      = "read-only"
-}
-```
-
-Register the exported launcher command in your clients. Choose `read-write`
-to expose all tools permitted by the Slack grant. See the module README for
-Codex environment forwarding and runtime requirements.
+The Linear, Slack, and Notion MCP adapters have moved to
+[`coder-tools/mcp`](https://github.com/semgrep/coder-tools/tree/main/mcp), which
+installs the generic `coder-mcp` executable during the workspace image build.
+Templates upgrading to this revision should remove those module calls, update
+their workspace image pin, and configure `coder-mcp` in their clients. Preserve
+read-only URLs and explicit tool allowlists; see the adapter README for examples.
+Templates pinned to older module SHAs continue to use their existing versions.
 
 ## `mandoline-mcp`
 
@@ -144,12 +116,3 @@ module "mandoline_mcp" {
   agent_id = coder_agent.main.id
 }
 ```
-
-## Notion MCP
-
-[`modules/notion-mcp`](modules/notion-mcp) installs an optional-auth stdio adapter
-for Notion's hosted MCP server using the workspace owner's Coder OAuth token.
-Read-only is the default and enforces a reviewed content-read tool allowlist
-on discovery and direct calls. Read-write is an explicit opt-in. The module
-includes frozen dependencies, optional-auth guidance, and tests. See its README
-for the distinction between adapter policy and the broader OAuth grant.

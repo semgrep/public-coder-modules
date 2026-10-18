@@ -93,16 +93,6 @@ module "git_credential_coder" {
 }
 ```
 
-## MCP adapter
-
-The Linear, Slack, and Notion MCP adapters have moved to
-[`coder-tools/mcp`](https://github.com/semgrep/coder-tools/tree/main/mcp), which
-installs the generic `coder-mcp` executable during the workspace image build.
-Templates upgrading to this revision should remove those module calls, update
-their workspace image pin, and configure `coder-mcp` in their clients. Preserve
-read-only URLs and explicit tool allowlists; see the adapter README for examples.
-Templates pinned to older module SHAs continue to use their existing versions.
-
 ## `mandoline-mcp`
 
 [`modules/mandoline-mcp`](modules/mandoline-mcp) installs Mandoline on the

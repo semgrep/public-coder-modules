@@ -16,6 +16,11 @@ run "latest_by_default" {
   }
 
   assert {
+    condition     = strcontains(coder_env.pi_path.value, "pi-coding-agent/node/current/bin") && strcontains(coder_script.pi.script, "SHASUMS256.txt")
+    error_message = "Pi must supply a verified Node runtime when another startup script has not installed one yet."
+  }
+
+  assert {
     condition     = strcontains(coder_script.pi.script, "selector='latest'") && strcontains(coder_script.pi.script, "npm view \"$package@latest\" version")
     error_message = "The default configuration must resolve the latest Pi release on startup."
   }

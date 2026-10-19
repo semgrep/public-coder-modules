@@ -101,6 +101,17 @@ variable "public_domain" {
   }
 }
 
+variable "wildcard_domain" {
+  description = "Optional Coder wildcard app domain (CODER_WILDCARD_ACCESS_URL without the leading `*.`). When set, pairing URLs use this T3 app's subdomain URL under it, built from the agent, workspace, and owner names at run time. Mutually exclusive with public_domain."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.wildcard_domain == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$", var.wildcard_domain))
+    error_message = "wildcard_domain must be empty or a domain name without a scheme, wildcard, path, or port."
+  }
+}
+
 variable "initial_settings" {
   description = "Initial T3 settings for a fresh data directory only. Omitted settings use T3's defaults; null disables seeding. Existing installations and later user changes are preserved."
   type        = any

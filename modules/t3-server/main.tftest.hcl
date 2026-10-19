@@ -168,3 +168,34 @@ run "invalid_initial_settings" {
 
   expect_failures = [var.initial_settings]
 }
+
+run "wildcard_domain_configuration" {
+  command = plan
+
+  variables {
+    agent_id        = "test-agent-id"
+    wildcard_domain = "coder.example.com"
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "printf '%s\\n' \"coder.example.com\" > \"$wildcard_domain_file\"")
+    error_message = "The wildcard domain must be recorded for the pairing shim."
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "printf '%s--%s--%s--%s.%s' t3 \"$agent_name\" \"$workspace_name\" \"$owner_name\" \"$wildcard_domain\"")
+    error_message = "The pairing shim must build the T3 app's subdomain URL from the agent's environment."
+  }
+}
+
+run "rejects_both_domains" {
+  command = plan
+
+  variables {
+    agent_id        = "test-agent-id"
+    public_domain   = "t3.example.com"
+    wildcard_domain = "coder.example.com"
+  }
+
+  expect_failures = [coder_script.t3_server]
+}

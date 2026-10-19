@@ -64,6 +64,7 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `channel` | Release channel selected at each start: `stable` or `nightly`. | `string` | `stable` | no |
 | `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
+| `wildcard_domain` | Optional Coder wildcard app domain; `t3 pair` links use this app's subdomain URL under it. Excludes `public_domain`. | `string` | `""` | no |
 | `initial_settings` | Settings object seeded once for fresh T3 data; `null` disables seeding. | `any` (object or null) | `{}` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
 
@@ -107,7 +108,11 @@ tail -f ~/.t3/logs/server.log
 To pair a native client, run `t3 pair` interactively in the workspace. When
 `public_domain` is set, the module's `t3` shim rewrites the loopback address in
 the pairing URL to `https://<public_domain>`; configure that domain to proxy to
-this app before sharing a link. Do not put pairing URLs in provisioning scripts
+this app before sharing a link. Alternatively, set `wildcard_domain` to the
+Coder deployment's wildcard app domain (`CODER_WILDCARD_ACCESS_URL` without the
+leading `*.`): the shim then links to this app's own subdomain URL,
+`t3--<agent>--<workspace>--<owner>.<wildcard_domain>`, taking the names from the
+environment the Coder agent sets. Do not put pairing URLs in provisioning scripts
 or logs.
 
 ## Initial settings

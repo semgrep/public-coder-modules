@@ -28,6 +28,10 @@ resource "coder_script" "t3_server" {
       condition     = var.log_rotation == null || var.server_backend == "openrc"
       error_message = "log_rotation requires server_backend = openrc."
     }
+    precondition {
+      condition     = var.public_domain == "" || var.wildcard_domain == ""
+      error_message = "Set at most one of public_domain and wildcard_domain."
+    }
   }
 
   # Install and start together: Terraform resource ordering does not order the
@@ -90,6 +94,7 @@ resource "coder_script" "t3_server" {
     t3_shim="$HOME/.local/bin/t3"
     t3_real_bin_file="$t3_home/t3-real-bin"
     public_domain_file="$t3_home/pair-public-domain"
+    wildcard_domain_file="$t3_home/pair-wildcard-domain"
 
     # T3 records its loopback listening address in the running server state,
     # so `t3 pair` would otherwise create a link that is unusable outside the
@@ -110,6 +115,8 @@ resource "coder_script" "t3_server" {
 
     printf '%s\n' "${var.public_domain}" > "$public_domain_file"
     chmod 600 "$public_domain_file"
+    printf '%s\n' "${var.wildcard_domain}" > "$wildcard_domain_file"
+    chmod 600 "$wildcard_domain_file"
 
     # (Re)write the pairing shim. Also run after a channel change, in case the
     # updater replaced ~/.local/bin/t3 with its own symlink.
@@ -122,6 +129,17 @@ resource "coder_script" "t3_server" {
     t3_home="$HOME/.t3"
     t3_real_bin="$(cat "$t3_home/t3-real-bin")"
     public_domain="$(cat "$t3_home/pair-public-domain")"
+    wildcard_domain="$(cat "$t3_home/pair-wildcard-domain")"
+
+    # The agent sets these names in every session it starts, so the subdomain
+    # app URL needs no names hardcoded at plan time.
+    agent_name="$${CODER_WORKSPACE_AGENT_NAME:-}"
+    workspace_name="$${CODER_WORKSPACE_NAME:-}"
+    owner_name="$${CODER_WORKSPACE_OWNER_NAME:-}"
+    if [ -z "$public_domain" ] && [ -n "$wildcard_domain" ] &&
+      [ -n "$agent_name" ] && [ -n "$workspace_name" ] && [ -n "$owner_name" ]; then
+      public_domain="$(printf '%s--%s--%s--%s.%s' ${coder_app.t3.slug} "$agent_name" "$workspace_name" "$owner_name" "$wildcard_domain" | tr '[:upper:]' '[:lower:]')"
+    fi
 
     if [ "$${1:-}" != "pair" ] || [ -z "$public_domain" ]; then
       exec "$t3_real_bin" "$@"

@@ -97,7 +97,9 @@ command="\"$HOME/.t3/openrc-config/serve\""
 pidfile="$XDG_RUNTIME_DIR/t3-server-supervisor.pid"
 input_file=/dev/null
 output_log=/dev/null
-umask=077
+# Match the nohup backend. T3's agents create checkouts that containers bind
+# mount as other users; private state is restricted explicitly.
+umask=022
 respawn_delay=2
 respawn_max=5
 respawn_period=60

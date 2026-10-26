@@ -9,7 +9,7 @@ terraform {
 resource "coder_env" "pi_path" {
   agent_id       = var.agent_id
   name           = "PATH"
-  value          = "$HOME/.local/bin:$PATH"
+  value          = "$HOME/.local/share/pi-coding-agent/node/current/bin:$HOME/.local/bin:$PATH"
   merge_strategy = "prepend"
 }
 
@@ -25,25 +25,66 @@ resource "coder_script" "pi" {
     #!/bin/sh
     set -eu
 
-    export PATH="$HOME/.local/bin:$PATH"
     install_dir="$HOME/.local/bin"
     state_dir="$HOME/.local/share/pi-coding-agent"
+    node_install_root="$state_dir/node"
+    node_bin_dir="$node_install_root/current/bin"
     npm_dir="$state_dir/npm"
     package='@earendil-works/pi-coding-agent'
     selector='${var.pi_version}'
+    export PATH="$node_bin_dir:$install_dir:$PATH"
 
     fail() {
       echo "Pi installation: $1" >&2
       exit 1
     }
 
-    command -v node >/dev/null 2>&1 || fail 'Node.js 22.19 or newer is required.'
-    node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)' \
-      || fail "Node.js 22.19 or newer is required (found $(node --version))."
-
     umask 077
     mkdir -p "$install_dir" "$state_dir"
     chmod 700 "$state_dir"
+
+    node_is_supported() {
+      command -v node >/dev/null 2>&1 &&
+        node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)' >/dev/null 2>&1
+    }
+
+    # Coder startup scripts run independently. A different module may install
+    # Node later, so Pi must be able to provide its own runtime when needed.
+    if ! node_is_supported; then
+      command -v curl >/dev/null 2>&1 || fail 'curl is required to install Node.js.'
+      command -v tar >/dev/null 2>&1 || fail 'tar is required to install Node.js.'
+      command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required to verify Node.js.'
+      command -v awk >/dev/null 2>&1 || fail 'awk is required to verify Node.js.'
+      [ "$(uname -s)" = Linux ] || fail 'Automatic Node.js installation supports Linux only.'
+      case "$(uname -m)" in
+        x86_64) node_arch=x64 ;;
+        aarch64|arm64) node_arch=arm64 ;;
+        *) fail "Unsupported Node.js architecture: $(uname -m)." ;;
+      esac
+      node_release='24.13.0'
+      node_archive="node-v$node_release-linux-$node_arch.tar.gz"
+      node_url="https://nodejs.org/dist/v$node_release"
+      node_stage="$(mktemp -d "$state_dir/node.XXXXXX")"
+      trap 'rm -rf "$node_stage"' EXIT HUP INT TERM
+      curl -fsSL --proto '=https' "$node_url/$node_archive" -o "$node_stage/$node_archive" \
+        || fail "Could not download Node.js $node_release."
+      curl -fsSL --proto '=https' "$node_url/SHASUMS256.txt" -o "$node_stage/SHASUMS256.txt" \
+        || fail "Could not download Node.js $node_release checksums."
+      node_sha="$(awk -v name="$node_archive" '$2 == name { print $1; exit }' "$node_stage/SHASUMS256.txt")"
+      [ -n "$node_sha" ] || fail "No checksum found for $node_archive."
+      printf '%s  %s\n' "$node_sha" "$node_stage/$node_archive" | sha256sum -c - >/dev/null \
+        || fail "Checksum verification failed for $node_archive."
+      mkdir -p "$node_stage/unpacked" "$node_install_root"
+      tar -xzf "$node_stage/$node_archive" -C "$node_stage/unpacked" --strip-components=1 \
+        || fail "Could not extract $node_archive."
+      [ -x "$node_stage/unpacked/bin/node" ] || fail 'Node.js archive did not contain a node executable.'
+      rm -rf "$node_install_root/current"
+      mv "$node_stage/unpacked" "$node_install_root/current" \
+        || fail 'Could not save the user-local Node.js runtime.'
+      rm -rf "$node_stage"
+      trap - EXIT HUP INT TERM
+    fi
+    node_is_supported || fail 'Node.js 22.19 or newer is required.'
 
     # Some Coder images expose node without npm. Bootstrap npm from its
     # official registry into the persistent user home only when needed.

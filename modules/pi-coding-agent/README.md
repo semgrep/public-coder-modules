@@ -39,17 +39,20 @@ releases automatically, but the resulting version can vary between starts.
 
 ## Requirements and behavior
 
-The Linux workspace image needs Node.js 22.19 or newer, `curl`, `tar`, and a
-POSIX shell. Node 24 is supported. Installation and upgrades need outbound
-HTTPS access to the npm registry. The `latest` setting also queries the
-registry on every start. If Node is present but npm is
-missing from `PATH`, the script downloads the npm CLI into the user's
-persistent `$HOME/.local/share/pi-coding-agent` directory. It then uses the
+The Linux workspace image needs `curl`, `tar`, `sha256sum`, `awk`, and a POSIX
+shell. If Node.js 22.19 or newer is unavailable when this module starts, it
+downloads and verifies Node.js 24.13.0 from nodejs.org into the user's
+persistent `$HOME/.local/share/pi-coding-agent` directory. This avoids relying
+on another Coder startup script to install Node first. Installation and upgrades
+need outbound HTTPS access to the npm registry; a missing Node runtime also
+requires access to nodejs.org. The `latest` setting queries the registry on
+every start. If Node is present but npm is missing from `PATH`, the script
+downloads the npm CLI into the same persistent directory. It then uses the
 [official npm installation command](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/quickstart.md)
 with `--ignore-scripts` and a user-local prefix. It does not need root or an
 image rebuild.
 
-The module prepends `$HOME/.local/bin` to the Coder agent `PATH`, so both
+The module prepends its Node runtime directory and `$HOME/.local/bin` to the Coder agent `PATH`, so both
 Coder terminals and the T3 server's agent environment can find `pi`. Pi's
 authentication, settings, and sessions stay in its normal `$HOME/.pi/agent`
 directory on persistent home storage. Authenticate interactively using Pi's

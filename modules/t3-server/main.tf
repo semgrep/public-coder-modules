@@ -51,7 +51,8 @@ resource "coder_script" "t3_server" {
     working_directory="${var.working_directory}"
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
     selected_channel="${var.channel}"
-    exact_version="${var.t3_version == null ? "" : var.t3_version}"
+    # Nightly follows its channel; the exact version pins Stable only.
+    exact_version="${var.channel == "stable" && var.t3_version != null ? var.t3_version : ""}"
     initial_settings="${var.initial_settings == null ? "" : base64encode(jsonencode(var.initial_settings))}"
 
     mkdir -p "$t3_home" "$log_dir"
@@ -83,7 +84,7 @@ resource "coder_script" "t3_server" {
       # The official installer writes the executable symlink to
       # $HOME/.local/bin and the runtime/data under $HOME/.t3. It only runs
       # when absent, so restarts do not upgrade T3 implicitly.
-      ${var.t3_version == null ? "curl -fsSL https://t3.codes/install.sh | T3CODE_CHANNEL=${var.channel} sh" : "curl -fsSL https://t3.codes/install.sh | T3CODE_VERSION=${var.t3_version} sh"}
+      ${var.channel == "stable" && var.t3_version != null ? "curl -fsSL https://t3.codes/install.sh | T3CODE_VERSION=${var.t3_version} sh" : "curl -fsSL https://t3.codes/install.sh | T3CODE_CHANNEL=${var.channel} sh"}
     fi
 
     t3_bin="$(command -v t3)"
@@ -152,17 +153,10 @@ resource "coder_script" "t3_server" {
       esac
     }
 
-    # An exact version is held on every start, on the channel it was
-    # published on. Otherwise only the channel is held, so a restart on an
-    # unchanged channel does not upgrade T3.
+    # A Stable exact version is held on every start. Otherwise only the
+    # channel is held, so a restart on an unchanged channel does not upgrade T3.
     update_needed=false
-    if [ -n "$exact_version" ]; then
-      target_version="t3 v$exact_version"
-      if ! selected_channel="$(version_channel "$target_version")"; then
-        echo "Cannot identify the T3 channel of version $exact_version" >&2
-        exit 1
-      fi
-    fi
+    target_version="t3 v$exact_version"
     if [ "$first_install" = false ]; then
       installed_version="$("$t3_bin" --version)"
       if [ -n "$exact_version" ]; then

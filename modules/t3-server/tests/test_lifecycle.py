@@ -84,7 +84,7 @@ class LifecycleTest(unittest.TestCase):
                         T3_TEST_TOKEN="test-secret-value",
                         XDG_CONFIG_HOME=str(self.root / "agent-config"),
                         XDG_RUNTIME_DIR=str(self.root / "agent-runtime"))
-        for release in ["stable", "nightly", "1.2.4", "1.2.5-nightly.2.1"]:
+        for release in ["stable", "nightly", "1.2.4"]:
             binary = self.home / ("t3-" + release)
             binary.write_text(FIXTURE)
             binary.chmod(0o700)
@@ -191,16 +191,18 @@ class LifecycleTest(unittest.TestCase):
         self.start("openrc", version="1.2.4")
         self.assertEqual(len(self.events()), 2)
         self.assertEqual(len(self.updates()), 1)
-        # A nightly pin overrides the stable channel selection.
-        self.start("openrc", version="1.2.5-nightly.2.1")
-        self.assertEqual(self.events()[-1]["version"], "1.2.5-nightly.2.1")
-        # Unpinning returns to the channel without pinning its version.
-        self.start("openrc")
-        self.assertEqual(self.events()[-1]["version"], "1.2.3")
+        # Nightly ignores the pin and follows its channel.
+        self.start("openrc", "nightly", version="1.2.4")
+        self.assertEqual(self.events()[-1]["version"], "1.2.3-nightly.1.1")
+        self.start("openrc", "nightly", version="1.2.4")
+        self.assertEqual(len(self.updates()), 2)
+        # Returning to stable restores the pin.
+        self.start("openrc", version="1.2.4")
+        self.assertEqual(self.events()[-1]["version"], "1.2.4")
         self.assertEqual(len(self.updates()), 3)
         result = subprocess.run([self.home / ".local/bin/t3", "--version"], env=self.env,
                                 capture_output=True, text=True, check=True)
-        self.assertEqual(result.stdout, "t3 v1.2.3\n")
+        self.assertEqual(result.stdout, "t3 v1.2.4\n")
 
     def test_rotation_and_logging_reconfiguration(self):
         self.start("openrc")

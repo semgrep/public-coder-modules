@@ -61,8 +61,8 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `share` | Coder app access: `owner`, `authenticated`, or `public`. | `string` | `owner` | no |
 | `port` | Loopback port for the T3 Code HTTP/WebSocket server. | `number` | `3773` | no |
 | `working_directory` | Directory from which T3 Code starts. | `string` | `/home/coder` | no |
-| `channel` | Release channel selected at each start: `stable` or `nightly`. Ignored when `t3_version` is set. | `string` | `stable` | no |
-| `t3_version` | Optional exact version, such as `0.1.5`, held on each start; overrides `channel`. | `string` | `null` | no |
+| `channel` | Release channel selected at each start: `stable` or `nightly`. | `string` | `stable` | no |
+| `t3_version` | Optional exact stable version, such as `0.1.5`, held on each start on the stable channel; ignored on nightly. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_settings` | Settings object seeded once for fresh T3 data; `null` disables seeding. | `any` (object or null) | `{}` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
@@ -88,14 +88,15 @@ to the selected channel only when it differs. A switch uses
 nightly selection returns to stable on the next start. An unchanged channel
 does not contact the release service or upgrade T3.
 
-When `t3_version` is set, the module installs that version if T3 is absent and
-otherwise switches to it on each start whose installed `t3 --version` differs,
-with `t3 update <version> --channel <channel> --allow-downgrade --yes`. The
-channel is the one the version was published on: `-nightly.` versions are
-nightly and plain versions are stable. Bumping `t3_version` therefore upgrades
-each workspace on its next start, and an unchanged version does not contact the
-release service. Unsetting it returns to `channel` without changing versions
-until the installed channel differs.
+When `t3_version` is set and `channel` is `stable`, the module installs that
+version if T3 is absent and otherwise switches to it on each start whose
+installed `t3 --version` differs, with
+`t3 update <version> --channel stable --allow-downgrade --yes`. Bumping
+`t3_version` therefore upgrades each stable workspace on its next start, and an
+unchanged version does not contact the release service. The nightly channel
+ignores `t3_version`, so a template can pin stable while still offering
+nightly. Unsetting it returns to plain channel selection without changing
+versions.
 
 `initial_repositories` is idempotent: an existing Git checkout is reused and
 each project is registered only once. It accepts only HTTPS URLs and simple

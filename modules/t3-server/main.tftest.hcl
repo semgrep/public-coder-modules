@@ -106,6 +106,7 @@ run "custom_configuration" {
     agent_id          = "test-agent-id"
     port              = 9000
     working_directory = "/work/project"
+    channel           = "nightly"
     t3_version        = "1.2.3"
     share             = "authenticated"
     public_domain     = "t3.example.com"
@@ -134,7 +135,7 @@ run "custom_configuration" {
 
   assert {
     condition     = strcontains(coder_script.t3_server.script, "T3CODE_VERSION=1.2.3")
-    error_message = "A stable exact version must take precedence during first installation."
+    error_message = "An exact version must take precedence during first installation."
   }
 
   assert {
@@ -168,28 +169,16 @@ run "invalid_initial_settings" {
   expect_failures = [var.initial_settings]
 }
 
-run "invalid_exact_version" {
+run "update_on_start" {
   command = plan
 
   variables {
-    agent_id   = "test-agent-id"
-    t3_version = "0.1.5-nightly.20261029.3877"
-  }
-
-  expect_failures = [var.t3_version]
-}
-
-run "nightly_ignores_exact_version" {
-  command = plan
-
-  variables {
-    agent_id   = "test-agent-id"
-    channel    = "nightly"
-    t3_version = "1.2.3"
+    agent_id        = "test-agent-id"
+    update_on_start = true
   }
 
   assert {
-    condition     = strcontains(coder_script.t3_server.script, "exact_version=\"\"") && strcontains(coder_script.t3_server.script, "T3CODE_CHANNEL=nightly")
-    error_message = "The nightly channel must ignore the exact stable version."
+    condition     = strcontains(coder_script.t3_server.script, "update_on_start=\"true\"")
+    error_message = "update_on_start must reach the startup script."
   }
 }

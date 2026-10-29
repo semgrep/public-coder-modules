@@ -73,7 +73,7 @@ variable "working_directory" {
 }
 
 variable "channel" {
-  description = "T3 Code release channel to install or select on each start. On stable, t3_version pins the exact release."
+  description = "T3 Code release channel to install or select on each start, unless t3_version is set."
   type        = string
   default     = "stable"
 
@@ -83,16 +83,17 @@ variable "channel" {
   }
 }
 
+variable "update_on_start" {
+  description = "Update T3 Code to the newest release on the selected channel on each start, restarting the server only if the release changed. Ignored when t3_version is set."
+  type        = bool
+  default     = false
+}
+
 variable "t3_version" {
-  description = "Optional exact stable T3 Code version, such as 0.1.5, installed or switched to on each start when channel is stable. Ignored on the nightly channel."
+  description = "Optional exact T3 Code version for first installation. When set, channel switching is disabled on later starts."
   type        = string
   default     = null
   nullable    = true
-
-  validation {
-    condition     = var.t3_version == null || can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.t3_version))
-    error_message = "t3_version must be a stable version such as 0.1.5."
-  }
 }
 
 variable "public_domain" {

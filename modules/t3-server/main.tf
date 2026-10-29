@@ -51,6 +51,7 @@ resource "coder_script" "t3_server" {
     working_directory="${var.working_directory}"
     repository_manifest="${base64encode(join("\n", [for repository in var.initial_repositories : "${repository.url}\t${repository.directory}"]))}"
     selected_channel="${var.channel}"
+    update_on_start="${var.update_on_start}"
     exact_version="${var.t3_version == null ? "" : var.t3_version}"
     initial_settings="${var.initial_settings == null ? "" : base64encode(jsonencode(var.initial_settings))}"
 
@@ -111,8 +112,11 @@ resource "coder_script" "t3_server" {
     printf '%s\n' "${var.public_domain}" > "$public_domain_file"
     chmod 600 "$public_domain_file"
 
-    # (Re)write the pairing shim. Also run after a channel change, in case the
-    # updater replaced ~/.local/bin/t3 with its own symlink.
+    # (Re)write the pairing shim. Also run after an update, in case the
+    # updater replaced ~/.local/bin/t3 with its own symlink. The shim also
+    # restarts the OpenRC service after `t3 update` changes the release: the
+    # updater only restarts services it installed, and otherwise leaves the
+    # supervised server on the old release.
     install_pairing_shim() {
       rm -f "$t3_shim"
       cat > "$t3_shim" <<'EOF'
@@ -122,6 +126,37 @@ resource "coder_script" "t3_server" {
     t3_home="$HOME/.t3"
     t3_real_bin="$(cat "$t3_home/t3-real-bin")"
     public_domain="$(cat "$t3_home/pair-public-domain")"
+
+    if [ "$${1:-}" = "update" ] && [ "$(cat "$t3_home/server-backend" 2>/dev/null || true)" = openrc ]; then
+      openrc_service() {
+        XDG_CONFIG_HOME="$t3_home/openrc-config" XDG_RUNTIME_DIR="/tmp/t3-openrc-$(id -u)" \
+          rc-service --user "$@"
+      }
+      previous_version="$("$t3_real_bin" --version)"
+      "$t3_real_bin" "$@"
+      updated_version="$("$t3_real_bin" --version)"
+      if [ "$updated_version" = "$previous_version" ] || ! openrc_service t3-server status >/dev/null 2>&1; then
+        exit 0
+      fi
+      # Match the updater: --yes restarts without asking, a terminal asks,
+      # and a script without --yes leaves the running server alone.
+      restart=false
+      for argument in "$@"; do
+        case "$argument" in --yes|-y) restart=true ;; esac
+      done
+      if [ "$restart" = false ] && [ -t 0 ]; then
+        printf 'Restart the T3 Code server to use %s? This interrupts active work. [Y/n] ' "$updated_version"
+        read -r answer || answer=n
+        case "$answer" in ''|[Yy]*) restart=true ;; esac
+      fi
+      if [ "$restart" = true ]; then
+        openrc_service t3-server restart
+      else
+        echo "The T3 Code server still runs $previous_version. Restart the workspace, or run:"
+        echo "  XDG_CONFIG_HOME=\"$t3_home/openrc-config\" XDG_RUNTIME_DIR=\"/tmp/t3-openrc-$(id -u)\" rc-service --user t3-server restart"
+      fi
+      exit 0
+    fi
 
     if [ "$${1:-}" != "pair" ] || [ -z "$public_domain" ]; then
       exec "$t3_real_bin" "$@"
@@ -256,7 +291,33 @@ resource "coder_script" "t3_server" {
       chmod 600 "$openrc_config_dir/config-checksum"
     fi
 
-    if [ "$channel_switch_needed" = false ] && is_healthy; then
+    # Install a newer release from the selected channel while any running
+    # server keeps serving, and restart below only if the release changed. A
+    # failed update, such as an unreachable release service, keeps the
+    # installed release rather than leaving the workspace without T3.
+    release_changed=false
+    if [ "$update_on_start" = true ] && [ "$first_install" = false ] && [ -z "$exact_version" ] && [ "$channel_switch_needed" = false ]; then
+      previous_version="$("$t3_bin" --version)"
+      update_timeout=""
+      if command -v timeout >/dev/null 2>&1; then
+        update_timeout="timeout 180"
+      fi
+      if $update_timeout "$t3_bin" update --channel "$selected_channel" --yes >>"$log_file" 2>&1; then
+        # Follow the launcher the updater repointed, as for a channel switch.
+        if [ -L "$t3_shim" ]; then
+          t3_bin="$(readlink -f "$t3_shim")"
+          printf '%s\n' "$t3_bin" > "$t3_real_bin_file"
+          install_pairing_shim
+        fi
+        if [ "$("$t3_bin" --version)" != "$previous_version" ]; then
+          release_changed=true
+        fi
+      else
+        echo "Could not update T3 Code; starting the installed $previous_version. Inspect $log_file" >&2
+      fi
+    fi
+
+    if [ "$channel_switch_needed" = false ] && [ "$release_changed" = false ] && is_healthy; then
       if [ "$server_backend" = nohup ] || openrc_service t3-server status >/dev/null 2>&1; then
         printf '%s\n' "$server_backend" > "$backend_file"
         chmod 600 "$backend_file"
@@ -290,6 +351,13 @@ resource "coder_script" "t3_server" {
       fi
       printf '%s\n' "$t3_bin" > "$t3_real_bin_file"
       install_pairing_shim
+    elif [ "$release_changed" = true ]; then
+      stop_openrc
+      stop_legacy_server
+      if is_healthy; then
+        echo "T3 Code is still responding on port $port after stopping its PID; cannot restart it on the updated release" >&2
+        exit 1
+      fi
     elif [ -n "$existing_t3_pid" ]; then
       attempt=0
       while [ "$attempt" -lt 30 ]; do

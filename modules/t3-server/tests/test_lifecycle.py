@@ -22,19 +22,33 @@ FIXTURE = r'''#!/usr/bin/env python3
 import http.server, json, os, pathlib, signal, sys, time
 home = pathlib.Path(os.environ["T3_TEST_HOME"])
 state = home / ".t3"
-channel = "nightly" if "nightly" in os.path.realpath(sys.argv[0]) else "stable"
+# Fixture binaries are named t3-<channel> or t3-<exact stable version>.
+release = os.path.basename(os.path.realpath(sys.argv[0]))[len("t3-"):]
+version = {"stable": "1.2.3", "nightly": "1.2.3-nightly.1"}.get(release, release)
+channel = "nightly" if "nightly" in version else "stable"
 if sys.argv[1] == "--version":
-    print("t3 v1.2.3" + ("-nightly.1" if channel == "nightly" else ""))
+    print("t3 v" + version)
     sys.exit(0)
 if sys.argv[1] == "update":
-    for row in (state / "events").read_text().splitlines():
-        pid = json.loads(row)["pid"]
-        try:
-            if pathlib.Path(f"/proc/{pid}/cmdline").read_bytes():
-                sys.exit("update attempted while a server was alive")
-        except FileNotFoundError:
-            pass
-    target = home / ("t3-" + sys.argv[sys.argv.index("--channel") + 1])
+    requested = sys.argv[sys.argv.index("--channel") + 1] if "--channel" in sys.argv else channel
+    # A channel switch must stop the server first; a same-channel update may
+    # install while it runs, like the real updater.
+    if requested != channel:
+        for row in (state / "events").read_text().splitlines():
+            pid = json.loads(row)["pid"]
+            try:
+                if pathlib.Path(f"/proc/{pid}/cmdline").read_bytes():
+                    sys.exit("update attempted while a server was alive")
+            except FileNotFoundError:
+                pass
+    # latest-<channel> names the newest release; the channel binary otherwise.
+    latest = state / ("latest-" + requested)
+    target = home / ("t3-" + (latest.read_text().strip() if latest.exists() else requested))
+    if not target.exists():
+        sys.exit(f"no release {target.name}")
+    if os.path.realpath(sys.argv[0]) == str(target):
+        print("already on the newest release")
+        sys.exit(0)
     # Like the real updater: repoint the launcher this was run through.
     launcher = pathlib.Path(sys.argv[0])
     assert launcher.is_symlink(), launcher
@@ -49,7 +63,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
 server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Handler)
 with (state / "events").open("a") as f:
-    f.write(json.dumps({"pid": os.getpid(), "channel": channel, "cwd": os.getcwd(),
+    f.write(json.dumps({"pid": os.getpid(), "channel": channel, "version": version, "cwd": os.getcwd(),
         "token": os.environ.get("T3_TEST_TOKEN"), "config": os.environ.get("XDG_CONFIG_HOME"),
         "runtime": os.environ.get("XDG_RUNTIME_DIR"), "path": os.environ.get("PATH"),
         "umask": pathlib.Path("/proc/self/status").read_text().split("Umask:\t", 1)[1][:4]}) + "\n")
@@ -79,8 +93,8 @@ class LifecycleTest(unittest.TestCase):
                         T3_TEST_TOKEN="test-secret-value",
                         XDG_CONFIG_HOME=str(self.root / "agent-config"),
                         XDG_RUNTIME_DIR=str(self.root / "agent-runtime"))
-        for channel in ["stable", "nightly"]:
-            binary = self.home / ("t3-" + channel)
+        for release in ["stable", "nightly", "1.2.4", "1.2.5"]:
+            binary = self.home / ("t3-" + release)
             binary.write_text(FIXTURE)
             binary.chmod(0o700)
         (self.home / ".local/bin/t3").symlink_to(self.home / "t3-stable")
@@ -96,10 +110,11 @@ class LifecycleTest(unittest.TestCase):
         shutil.copy(MODULE / "openrc.sh", self.root)
         shutil.copy(MODULE / "initial-settings.sh", self.root)
 
-    def render(self, backend, channel="stable", rotation=None):
+    def render(self, backend, channel="stable", rotation=None, update_on_start=False):
         args = [TERRAFORM, "console", "-var=agent_id=test", f"-var=server_backend={backend}",
                 f"-var=channel={channel}", f"-var=port={self.port}",
-                f"-var=working_directory={self.work}", f"-var=log_directory={self.root}/logs"]
+                f"-var=working_directory={self.work}", f"-var=log_directory={self.root}/logs",
+                f"-var=update_on_start={str(update_on_start).lower()}"]
         if rotation is not None:
             args.append("-var=log_rotation=" + json.dumps(rotation))
         result = subprocess.run(args, cwd=self.root, input="jsonencode(local.script)\n",
@@ -110,8 +125,8 @@ class LifecycleTest(unittest.TestCase):
         script = script.replace('/tmp/t3-openrc-$(id -u)', str(self.runtime))
         return script
 
-    def start(self, backend, channel="stable", rotation=None, expected=0):
-        result = subprocess.run(["sh"], input=self.render(backend, channel, rotation), env=self.env,
+    def start(self, backend, channel="stable", rotation=None, expected=0, update_on_start=False):
+        result = subprocess.run(["sh"], input=self.render(backend, channel, rotation, update_on_start), env=self.env,
                                 text=True, capture_output=True, timeout=45)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         self.assertNotIn("PAIRING_SECRET", result.stdout + result.stderr)
@@ -169,6 +184,50 @@ class LifecycleTest(unittest.TestCase):
         self.start("nohup", "nightly")
         self.assertEqual(len(self.events()), count)
         self.assertNotIn("PAIRING_SECRET", (self.root / "logs/server.log").read_text())
+
+    def updates(self):
+        path = self.home / ".t3/updates"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def t3(self, *args):
+        return subprocess.run([self.home / ".local/bin/t3", *args], env=self.env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=40, check=True).stdout
+
+    def test_update_on_start(self):
+        self.start("openrc", update_on_start=True)
+        self.assertEqual(len(self.events()), 1)
+        self.assertEqual(self.updates(), [])
+        # A newer release is installed and the running server restarted on it.
+        (self.home / ".t3/latest-stable").write_text("1.2.4")
+        self.start("openrc", update_on_start=True)
+        self.assertEqual(len(self.events()), 2)
+        self.assertEqual(self.events()[-1]["version"], "1.2.4")
+        # An unchanged release does not restart the server.
+        self.start("openrc", update_on_start=True)
+        self.assertEqual(len(self.events()), 2)
+        # A failed update keeps serving the installed release.
+        (self.home / ".t3/latest-stable").write_text("missing")
+        result = self.start("openrc", update_on_start=True)
+        self.assertIn("Could not update T3 Code", result.stderr)
+        self.assertEqual(len(self.events()), 2)
+        self.assertEqual(self.t3("--version"), "t3 v1.2.4\n")
+
+    def test_update_command_restarts_openrc(self):
+        self.start("openrc")
+        # From a script without --yes, the server is left alone with a hint.
+        (self.home / ".t3/latest-stable").write_text("1.2.4")
+        self.assertIn("rc-service --user t3-server restart", self.t3("update"))
+        self.assertEqual(len(self.events()), 1)
+        # --yes restarts the supervised server on the new release.
+        (self.home / ".t3/latest-stable").write_text("1.2.5")
+        self.t3("update", "--yes")
+        self.wait_for(lambda: len(self.events()) == 2)
+        self.assertEqual(self.events()[-1]["version"], "1.2.5")
+        self.assertEqual(self.rc("t3-server", "status").returncode, 0)
+        # Nothing to install: no restart.
+        self.t3("update", "--yes")
+        time.sleep(1)
+        self.assertEqual(len(self.events()), 2)
 
     def test_rotation_and_logging_reconfiguration(self):
         self.start("openrc")

@@ -168,3 +168,17 @@ run "invalid_initial_settings" {
 
   expect_failures = [var.initial_settings]
 }
+
+run "update_on_start" {
+  command = plan
+
+  variables {
+    agent_id        = "test-agent-id"
+    update_on_start = true
+  }
+
+  assert {
+    condition     = strcontains(coder_script.t3_server.script, "update_on_start=\"true\"")
+    error_message = "update_on_start must reach the startup script."
+  }
+}

@@ -83,6 +83,12 @@ variable "channel" {
   }
 }
 
+variable "update_on_start" {
+  description = "Update T3 Code to the newest release on the selected channel on each start, restarting the server only if the release changed. Ignored when t3_version is set."
+  type        = bool
+  default     = false
+}
+
 variable "t3_version" {
   description = "Optional exact T3 Code version for first installation. When set, channel switching is disabled on later starts."
   type        = string

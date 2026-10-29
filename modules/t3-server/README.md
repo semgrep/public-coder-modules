@@ -63,6 +63,7 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `working_directory` | Directory from which T3 Code starts. | `string` | `/home/coder` | no |
 | `channel` | Release channel selected at each start: `stable` or `nightly`. | `string` | `stable` | no |
 | `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
+| `update_on_start` | Update to the newest release on `channel` at each start; ignored when `t3_version` is set. | `bool` | `false` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_settings` | Settings object seeded once for fresh T3 data; `null` disables seeding. | `any` (object or null) | `{}` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
@@ -89,6 +90,18 @@ nightly selection returns to stable on the next start. An unchanged channel
 does not contact the release service or upgrade T3. When `t3_version` is set,
 it takes precedence on first install; existing installations are left at their
 current version and channel. It does not continuously enforce the exact version.
+
+With `update_on_start = true`, each start also runs
+`t3 update --channel <channel> --yes` while any running server keeps serving.
+If that installs a different release, startup restarts the owned server on it;
+otherwise the server is left alone. A failed or timed-out update, such as when
+the release service is unreachable, is logged and the installed release starts.
+
+The PATH shim also handles `t3 update` with the OpenRC backend. T3's updater
+only restarts services it installed, so after an update that changes the
+release, the shim restarts `t3-server`: immediately with `--yes`, after a prompt
+in a terminal, and otherwise it prints the restart command and leaves the
+running server alone. Restarting interrupts active work.
 
 `initial_repositories` is idempotent: an existing Git checkout is reused and
 each project is registered only once. It accepts only HTTPS URLs and simple

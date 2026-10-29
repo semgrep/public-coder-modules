@@ -152,15 +152,28 @@ resource "coder_script" "t3_server" {
       esac
     }
 
-    channel_switch_needed=false
-    if [ "$first_install" = false ] && [ -z "$exact_version" ]; then
-      installed_version="$("$t3_bin" --version)"
-      if ! installed_channel="$(version_channel "$installed_version")"; then
-        echo "Cannot identify installed T3 channel from: $installed_version" >&2
+    # An exact version is held on every start, on the channel it was
+    # published on. Otherwise only the channel is held, so a restart on an
+    # unchanged channel does not upgrade T3.
+    update_needed=false
+    if [ -n "$exact_version" ]; then
+      target_version="t3 v$exact_version"
+      if ! selected_channel="$(version_channel "$target_version")"; then
+        echo "Cannot identify the T3 channel of version $exact_version" >&2
         exit 1
       fi
-      if [ "$installed_channel" != "$selected_channel" ]; then
-        channel_switch_needed=true
+    fi
+    if [ "$first_install" = false ]; then
+      installed_version="$("$t3_bin" --version)"
+      if [ -n "$exact_version" ]; then
+        if [ "$installed_version" != "$target_version" ]; then
+          update_needed=true
+        fi
+      elif ! installed_channel="$(version_channel "$installed_version")"; then
+        echo "Cannot identify installed T3 channel from: $installed_version" >&2
+        exit 1
+      elif [ "$installed_channel" != "$selected_channel" ]; then
+        update_needed=true
       fi
     fi
 
@@ -256,7 +269,7 @@ resource "coder_script" "t3_server" {
       chmod 600 "$openrc_config_dir/config-checksum"
     fi
 
-    if [ "$channel_switch_needed" = false ] && is_healthy; then
+    if [ "$update_needed" = false ] && is_healthy; then
       if [ "$server_backend" = nohup ] || openrc_service t3-server status >/dev/null 2>&1; then
         printf '%s\n' "$server_backend" > "$backend_file"
         chmod 600 "$backend_file"
@@ -266,15 +279,17 @@ resource "coder_script" "t3_server" {
       exit 1
     fi
 
-    if [ "$channel_switch_needed" = true ]; then
+    if [ "$update_needed" = true ]; then
       stop_openrc
       stop_legacy_server
       if is_healthy; then
-        echo "T3 Code is still responding on port $port after stopping its PID; cannot switch channel safely" >&2
+        echo "T3 Code is still responding on port $port after stopping its PID; cannot update T3 safely" >&2
         exit 1
       fi
 
-      "$t3_bin" update --channel "$selected_channel" --allow-downgrade --yes
+      # An empty exact version must not become an empty argument, which the
+      # updater would reject as a version.
+      "$t3_bin" update $${exact_version:+"$exact_version"} --channel "$selected_channel" --allow-downgrade --yes
       # The updater repoints the launcher it was run from, which is
       # ~/.local/bin/t3-real once the pairing shim has taken ~/.local/bin/t3,
       # and leaves the shim alone. If it replaced ~/.local/bin/t3 instead,
@@ -284,7 +299,12 @@ resource "coder_script" "t3_server" {
         t3_bin="$(readlink -f "$t3_shim")"
       fi
       updated_version="$("$t3_bin" --version)"
-      if ! updated_channel="$(version_channel "$updated_version")" || [ "$updated_channel" != "$selected_channel" ]; then
+      if [ -n "$exact_version" ]; then
+        if [ "$updated_version" != "$target_version" ]; then
+          echo "T3 update did not select $exact_version (got $updated_version)" >&2
+          exit 1
+        fi
+      elif ! updated_channel="$(version_channel "$updated_version")" || [ "$updated_channel" != "$selected_channel" ]; then
         echo "T3 update did not select $selected_channel (got $updated_version)" >&2
         exit 1
       fi

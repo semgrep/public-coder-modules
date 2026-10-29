@@ -168,3 +168,14 @@ run "invalid_initial_settings" {
 
   expect_failures = [var.initial_settings]
 }
+
+run "invalid_exact_version" {
+  command = plan
+
+  variables {
+    agent_id   = "test-agent-id"
+    t3_version = "latest"
+  }
+
+  expect_failures = [var.t3_version]
+}

@@ -61,8 +61,8 @@ root or an OpenRC PID 1. Optional log rotation additionally requires `svlogd`
 | `share` | Coder app access: `owner`, `authenticated`, or `public`. | `string` | `owner` | no |
 | `port` | Loopback port for the T3 Code HTTP/WebSocket server. | `number` | `3773` | no |
 | `working_directory` | Directory from which T3 Code starts. | `string` | `/home/coder` | no |
-| `channel` | Release channel selected at each start: `stable` or `nightly`. | `string` | `stable` | no |
-| `t3_version` | Optional exact version for first installation; disables channel switching. | `string` | `null` | no |
+| `channel` | Release channel selected at each start: `stable` or `nightly`. Ignored when `t3_version` is set. | `string` | `stable` | no |
+| `t3_version` | Optional exact version, such as `0.1.5`, held on each start; overrides `channel`. | `string` | `null` | no |
 | `public_domain` | Optional HTTPS public domain used in `t3 pair` links, without a scheme. | `string` | `""` | no |
 | `initial_settings` | Settings object seeded once for fresh T3 data; `null` disables seeding. | `any` (object or null) | `{}` | no |
 | `initial_repositories` | HTTPS repositories to clone into `$HOME/git` and add as projects. | `list(object({ url = string, directory = string }))` | `[]` | no |
@@ -86,17 +86,24 @@ On later starts it reads the installed CLI's `t3 --version` output and switches
 to the selected channel only when it differs. A switch uses
 `t3 update --channel <channel> --allow-downgrade --yes`, so an ephemeral
 nightly selection returns to stable on the next start. An unchanged channel
-does not contact the release service or upgrade T3. When `t3_version` is set,
-it takes precedence on first install; existing installations are left at their
-current version and channel. It does not continuously enforce the exact version.
+does not contact the release service or upgrade T3.
+
+When `t3_version` is set, the module installs that version if T3 is absent and
+otherwise switches to it on each start whose installed `t3 --version` differs,
+with `t3 update <version> --channel <channel> --allow-downgrade --yes`. The
+channel is the one the version was published on: `-nightly.` versions are
+nightly and plain versions are stable. Bumping `t3_version` therefore upgrades
+each workspace on its next start, and an unchanged version does not contact the
+release service. Unsetting it returns to `channel` without changing versions
+until the installed channel differs.
 
 `initial_repositories` is idempotent: an existing Git checkout is reused and
 each project is registered only once. It accepts only HTTPS URLs and simple
-directory names to prevent path traversal. For a channel switch, startup stops
+directory names to prevent path traversal. For a version or channel switch, startup stops
 the owned server through its verified PID (`nohup`) or supervisor (`openrc`)
 before updating and restarting it. This interrupts active work.
 If an unowned server still responds, startup fails instead of claiming
-the new channel is active. Channel detection depends on the CLI's version
+the new release is active. Channel detection depends on the CLI's version
 format: versions with `-nightly.` are nightly, plain versions are stable, and
 unrecognized formats fail startup. Inspect startup failures with:
 
@@ -175,7 +182,7 @@ unresponsive server is not automatically restarted.
 
 Switching backends stops the module's previous server before starting the new
 one. Selecting OpenRC refuses to adopt an already responding server without
-module ownership. Channel changes stop the supervisor before updating T3.
+module ownership. Version and channel changes stop the supervisor before updating T3.
 Changes to the OpenRC launch or logging configuration also restart its service,
 interrupting active work. After switching to `nohup`, leave OpenRC installed
 until the workspace has completed that startup so it can stop the old service.

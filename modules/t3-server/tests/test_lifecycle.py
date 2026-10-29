@@ -22,9 +22,12 @@ FIXTURE = r'''#!/usr/bin/env python3
 import http.server, json, os, pathlib, signal, sys, time
 home = pathlib.Path(os.environ["T3_TEST_HOME"])
 state = home / ".t3"
-channel = "nightly" if "nightly" in os.path.realpath(sys.argv[0]) else "stable"
+# Fixture binaries are named t3-<channel> or t3-<exact version>.
+release = os.path.basename(os.path.realpath(sys.argv[0]))[len("t3-"):]
+version = {"stable": "1.2.3", "nightly": "1.2.3-nightly.1.1"}.get(release, release)
+channel = "nightly" if "nightly" in version else "stable"
 if sys.argv[1] == "--version":
-    print("t3 v1.2.3" + ("-nightly.1" if channel == "nightly" else ""))
+    print("t3 v" + version)
     sys.exit(0)
 if sys.argv[1] == "update":
     for row in (state / "events").read_text().splitlines():
@@ -34,7 +37,9 @@ if sys.argv[1] == "update":
                 sys.exit("update attempted while a server was alive")
         except FileNotFoundError:
             pass
-    target = home / ("t3-" + sys.argv[sys.argv.index("--channel") + 1])
+    requested = sys.argv[2] if not sys.argv[2].startswith("--") else sys.argv[sys.argv.index("--channel") + 1]
+    target = home / ("t3-" + requested)
+    assert target.exists(), target
     # Like the real updater: repoint the launcher this was run through.
     launcher = pathlib.Path(sys.argv[0])
     assert launcher.is_symlink(), launcher
@@ -49,7 +54,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
 server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Handler)
 with (state / "events").open("a") as f:
-    f.write(json.dumps({"pid": os.getpid(), "channel": channel, "cwd": os.getcwd(),
+    f.write(json.dumps({"pid": os.getpid(), "channel": channel, "version": version, "cwd": os.getcwd(),
         "token": os.environ.get("T3_TEST_TOKEN"), "config": os.environ.get("XDG_CONFIG_HOME"),
         "runtime": os.environ.get("XDG_RUNTIME_DIR"), "path": os.environ.get("PATH"),
         "umask": pathlib.Path("/proc/self/status").read_text().split("Umask:\t", 1)[1][:4]}) + "\n")
@@ -79,8 +84,8 @@ class LifecycleTest(unittest.TestCase):
                         T3_TEST_TOKEN="test-secret-value",
                         XDG_CONFIG_HOME=str(self.root / "agent-config"),
                         XDG_RUNTIME_DIR=str(self.root / "agent-runtime"))
-        for channel in ["stable", "nightly"]:
-            binary = self.home / ("t3-" + channel)
+        for release in ["stable", "nightly", "1.2.4", "1.2.5-nightly.2.1"]:
+            binary = self.home / ("t3-" + release)
             binary.write_text(FIXTURE)
             binary.chmod(0o700)
         (self.home / ".local/bin/t3").symlink_to(self.home / "t3-stable")
@@ -96,10 +101,12 @@ class LifecycleTest(unittest.TestCase):
         shutil.copy(MODULE / "openrc.sh", self.root)
         shutil.copy(MODULE / "initial-settings.sh", self.root)
 
-    def render(self, backend, channel="stable", rotation=None):
+    def render(self, backend, channel="stable", rotation=None, version=None):
         args = [TERRAFORM, "console", "-var=agent_id=test", f"-var=server_backend={backend}",
                 f"-var=channel={channel}", f"-var=port={self.port}",
                 f"-var=working_directory={self.work}", f"-var=log_directory={self.root}/logs"]
+        if version is not None:
+            args.append(f"-var=t3_version={version}")
         if rotation is not None:
             args.append("-var=log_rotation=" + json.dumps(rotation))
         result = subprocess.run(args, cwd=self.root, input="jsonencode(local.script)\n",
@@ -110,8 +117,8 @@ class LifecycleTest(unittest.TestCase):
         script = script.replace('/tmp/t3-openrc-$(id -u)', str(self.runtime))
         return script
 
-    def start(self, backend, channel="stable", rotation=None, expected=0):
-        result = subprocess.run(["sh"], input=self.render(backend, channel, rotation), env=self.env,
+    def start(self, backend, channel="stable", rotation=None, expected=0, version=None):
+        result = subprocess.run(["sh"], input=self.render(backend, channel, rotation, version), env=self.env,
                                 text=True, capture_output=True, timeout=45)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         self.assertNotIn("PAIRING_SECRET", result.stdout + result.stderr)
@@ -169,6 +176,31 @@ class LifecycleTest(unittest.TestCase):
         self.start("nohup", "nightly")
         self.assertEqual(len(self.events()), count)
         self.assertNotIn("PAIRING_SECRET", (self.root / "logs/server.log").read_text())
+
+    def updates(self):
+        path = self.home / ".t3/updates"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_exact_version_is_held_on_each_start(self):
+        self.start("openrc")
+        self.start("openrc", version="1.2.4")
+        self.assertEqual(self.events()[-1]["version"], "1.2.4")
+        self.assertEqual(len(self.events()), 2)
+        self.assertEqual(len(self.updates()), 1)
+        # An unchanged pin neither contacts the updater nor restarts T3.
+        self.start("openrc", version="1.2.4")
+        self.assertEqual(len(self.events()), 2)
+        self.assertEqual(len(self.updates()), 1)
+        # A nightly pin overrides the stable channel selection.
+        self.start("openrc", version="1.2.5-nightly.2.1")
+        self.assertEqual(self.events()[-1]["version"], "1.2.5-nightly.2.1")
+        # Unpinning returns to the channel without pinning its version.
+        self.start("openrc")
+        self.assertEqual(self.events()[-1]["version"], "1.2.3")
+        self.assertEqual(len(self.updates()), 3)
+        result = subprocess.run([self.home / ".local/bin/t3", "--version"], env=self.env,
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout, "t3 v1.2.3\n")
 
     def test_rotation_and_logging_reconfiguration(self):
         self.start("openrc")

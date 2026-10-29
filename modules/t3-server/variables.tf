@@ -73,7 +73,7 @@ variable "working_directory" {
 }
 
 variable "channel" {
-  description = "T3 Code release channel to install or select on each start, unless t3_version is set."
+  description = "T3 Code release channel to install or select on each start. Ignored when t3_version is set."
   type        = string
   default     = "stable"
 
@@ -84,10 +84,15 @@ variable "channel" {
 }
 
 variable "t3_version" {
-  description = "Optional exact T3 Code version for first installation. When set, channel switching is disabled on later starts."
+  description = "Optional exact T3 Code version, such as 0.1.5 or 0.1.5-nightly.20261029.3877, installed or switched to on each start. When set, it overrides channel."
   type        = string
   default     = null
   nullable    = true
+
+  validation {
+    condition     = var.t3_version == null || can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+(-nightly\\.[0-9]+\\.[0-9]+)?$", var.t3_version))
+    error_message = "t3_version must be a stable version such as 0.1.5 or a nightly version such as 0.1.5-nightly.20261029.3877."
+  }
 }
 
 variable "public_domain" {
